@@ -1,0 +1,15 @@
+---
+layout: default
+title: test title
+description: test description
+is_home: true
+---
+
+<h2>prototypes</h2>
+<ul>
+  {% for page in site.pages %}
+    {% if page.path contains 'prototypes/' %}
+      <li><a href="{{ page.url }}">{{ page.name }}</a></li>
+    {% endif %}
+  {% endfor %}
+</ul>
