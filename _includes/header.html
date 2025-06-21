@@ -1,5 +1,5 @@
 <header>
-    {% if page.url contains '/prototypes/' %}
+    {% if page.url != '/' %}
         <a href="{{ site.baseurl }}/">&larr; back</a>
     {% endif %}
     <h2>/{{ page.title }}</h2>
