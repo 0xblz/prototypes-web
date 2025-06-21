@@ -10,7 +10,13 @@
 <body>
     <main>
         {% include header.html %}
-        {{ content }}
+        {% if page.show_container %}
+            <div class="container">
+                {{ content }}
+            </div>
+        {% else %}
+            {{ content }}
+        {% endif %}
         {% include footer.html %}
     </main>
 </body>

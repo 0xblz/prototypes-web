@@ -2,12 +2,72 @@
 body {
     font-family: 'DM Sans', sans-serif;
     font-size: 16px;
+    background-color: var(--primary-color);
+    background-image: radial-gradient(circle, rgba(255, 255, 255, 0.3) 1px, transparent 1px);
+    background-size: 1.5rem 1.5rem;
 }
 
 main {
     display: flex;
     flex-direction: column;
     align-items: center;
+    color: white;
+    width: 100%;
+}
+
+header,
+footer {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    justify-content: space-between;
     padding: 2rem;
-    gap: 4rem;
+    gap: 2rem;
+    width: 100%;
+    max-width: 720px;
+}
+
+.page-list {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    max-width: 720px;
+    gap: 0.5rem;
+    padding: 2rem;
+
+    a {
+        position: relative;
+        padding-left: 1rem;
+
+        &::before {
+            content: '-';
+            position: absolute;
+            left: 0;
+            top: 0;
+        }
+    }
+}
+
+.container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+    width: 100%;
+    height: 100%;
+    max-width: 720px;
+    border-radius: 1.5rem;
+    border: 2px dashed rgba(255, 255, 255, 0.6);
+}
+
+a {
+    color: white;
+    text-decoration: none;
+    font-weight: 700;
+    &:hover,
+    &:focus,
+    &:active {
+        color: var(--secondary-color);
+    }
 }

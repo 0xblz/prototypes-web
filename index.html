@@ -1,15 +1,14 @@
 ---
 layout: default
-title: test title
-description: test description
+title: prototypes
+description: prototypes
 is_home: true
 ---
 
-<h2>prototypes</h2>
-<ul>
+<div class="page-list">
   {% for page in site.pages %}
     {% if page.path contains 'prototypes/' %}
-      <li><a href="{{ site.baseurl }}/{{ page.path | replace: '.html', '' }}">{{ page.name }}</a></li>
+      <a href="{{ site.baseurl }}/{{ page.path | replace: '.html', '' }}">/{{ page.name | replace: '.html', '' }}</a>
     {% endif %}
   {% endfor %}
-</ul>
+</div>

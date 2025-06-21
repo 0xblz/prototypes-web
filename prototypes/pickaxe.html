@@ -2,17 +2,18 @@
 layout: default
 title: pickaxe
 description: pickaxe prototype
+show_container: true
 ---
 
 <style>
-.container {
+.pickaxe-container {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   padding: 2rem;
-  width: 320px;
-  max-width: 100%;
+  width: 100%;
+  max-width: 320px;
   border-radius: 24px;
   border: 2px solid rgba(255, 255, 255, 0.60);
   background: linear-gradient(232deg, color(display-p3 1 1 1 / 0.00) 16.83%, color(display-p3 1 1 1 / 0.40) 25.42%, color(display-p3 1 1 1 / 0.00) 31.48%, color(display-p3 1 1 1 / 0.00) 40.06%, color(display-p3 1 1 1 / 0.40) 54.2%, color(display-p3 1 1 1 / 0.00) 62.27%, color(display-p3 1 1 1 / 0.00) 80.96%, color(display-p3 1 1 1 / 0.40) 90.04%, color(display-p3 1 1 1 / 0.00) 99.13%), linear-gradient(0deg, var(--Color-Sky-300, color(display-p3 0.4902 0.8275 0.9882)) 0%, var(--Color-Sky-100, color(display-p3 0.8784 0.949 0.9961)) 100%);
@@ -84,7 +85,7 @@ description: pickaxe prototype
 }
 </style>
 
-<div class="container">
+<div class="pickaxe-container">
     <div class="pickaxe-animation">
         <img src="{{ site.baseurl }}/assets/images/pickaxe.png" alt="pickaxe">
         <div class="diamond-pop">
