@@ -8,7 +8,7 @@ is_home: true
 <div class="page-list">
   {% for page in site.pages %}
     {% if page.path contains 'prototypes/' %}
-      <a href="{{ site.baseurl }}/{{ page.path | replace: '.html', '' }}">/{{ page.name | replace: '.html', '' }}</a>
+      <a href="{{ site.baseurl }}/{{ page.path | replace: '.html', '' }}">/{{ page.name | replace: '.html', '' }} <small>({{ page.description }})</small></a>
     {% endif %}
   {% endfor %}
 </div>
