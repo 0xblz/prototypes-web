@@ -6,7 +6,7 @@ baseurl: "/quick-web"
 
 # Build settings
 markdown: kramdown
-permalink: pretty
+permalink: default
 exclude: [README.md, Gemfile, Gemfile.lock]
 
 # Collections
