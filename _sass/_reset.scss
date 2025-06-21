@@ -7,15 +7,4 @@ html {
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     text-rendering: optimizeLegibility;
-}
-
-// Selection styling
-::-moz-selection {
-    color: var(--secondary-color);
-    background: var(--primary-color);
-}
-
-::selection {
-    color: var(--secondary-color);
-    background: var(--primary-color);
 } 

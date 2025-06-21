@@ -5,13 +5,13 @@ body {
     background-color: var(--primary-color);
     background-image: radial-gradient(circle, rgba(255, 255, 255, 0.3) 1px, transparent 1px);
     background-size: 1.5rem 1.5rem;
+    color: white;
 }
 
 main {
     display: flex;
     flex-direction: column;
     align-items: center;
-    color: white;
     width: 100%;
 }
 
@@ -36,16 +36,6 @@ footer {
     padding: 2rem;
 
     a {
-        position: relative;
-        padding-left: 1rem;
-
-        &::before {
-            content: '-';
-            position: absolute;
-            left: 0;
-            top: 0;
-        }
-
         small {
             font-size: 0.8rem;
             color: rgba(255, 255, 255, 0.6);
@@ -64,7 +54,7 @@ footer {
     height: 100%;
     max-width: 720px;
     border-radius: 1.5rem;
-    border: 2px dashed rgba(255, 255, 255, 0.6);
+    border: 2px dashed var(--secondary-color);
 }
 
 a {
