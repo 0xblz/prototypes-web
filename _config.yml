@@ -1,8 +1,8 @@
 # Site settings
 title: test title
 description: test description
-url: "https://test.com"
-baseurl: ""
+url: "https://0xblz.github.io"
+baseurl: "/quick-web"
 
 # Build settings
 markdown: kramdown
