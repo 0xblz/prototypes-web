@@ -9,7 +9,7 @@ is_home: true
 <ul>
   {% for page in site.pages %}
     {% if page.path contains 'prototypes/' %}
-      <li><a href="{{ page.url }}">{{ page.name }}</a></li>
+      <li><a href="{{ site.baseurl }}/{{ page.path | replace: '.html', '' }}">{{ page.name }}</a></li>
     {% endif %}
   {% endfor %}
 </ul>
