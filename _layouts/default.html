@@ -11,13 +11,9 @@
 <body>
     <main>
         {% include header.html %}
-        {% if page.show_container %}
-            <div class="container">
-                {{ content }}
-            </div>
-        {% else %}
+        <div class="page-container">
             {{ content }}
-        {% endif %}
+        </div>
     </main>
 
     <!-- Google tag (gtag.js) -->

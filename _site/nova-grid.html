@@ -10,7 +10,7 @@
 </head>
 <body>
     <main>
-        <header class="fixed">
+        <div class="page-header">
     <h2>
         
             <a href="/"><i class="fa-solid fa-arrow-left"></i> /</a>
@@ -18,28 +18,30 @@
         nova grid
     </h2>
     <a href="https://blaze.design"><i class="fa-solid fa-house"></i> blaze.design</a>
-</header>
-        
-            <div class="container">
-                <style>
-    html, body {
-        margin: 0;
-        padding: 0;
-        overflow: hidden;
-        background: #000;
-    }
-
+</div>
+        <div class="page-container">
+            <style>
     .background-canvas {
-        width: 100vw;
-        height: 100vh;
+        width: 100%;
+        height: 400px; /* Set your desired height here */
+        position: relative;
+        overflow: hidden;
     }
 
-    .container {
-        width: 100%;
-        border: none;
-        border-radius: 0;
+    .page-container {
+        border-radius: 5rem;
+        overflow: hidden;
         padding: 0;
         margin: 0;
+    }
+
+    .background-canvas canvas {
+        width: 100% !important;
+        height: 100% !important;
+        display: block;
+        position: absolute;
+        top: 0;
+        left: 0;
     }
 </style>
 
@@ -534,7 +536,7 @@
                 antialias: false,
                 alpha: true
             });
-            this.renderer.setSize(window.innerWidth, window.innerHeight);
+            this.renderer.setSize(canvas.clientWidth, canvas.clientHeight);
             this.renderer.setPixelRatio(window.devicePixelRatio);
             this.renderer.setClearColor(SCENE_CONFIG.colors.background);
             
@@ -2055,20 +2057,20 @@
         }
 
         onWindowResize() {
-            this.camera.aspect = window.innerWidth / window.innerHeight;
+            const container = document.getElementById('novaGridCanvas');
+            this.camera.aspect = container.clientWidth / container.clientHeight;
             this.camera.updateProjectionMatrix();
-            this.renderer.setSize(window.innerWidth, window.innerHeight);
-            this.composer.setSize(window.innerWidth, window.innerHeight);
+            this.renderer.setSize(container.clientWidth, container.clientHeight);
+            this.composer.setSize(container.clientWidth, container.clientHeight);
         }
 
         createMobileControls() {
             const mobileControls = document.createElement('div');
             mobileControls.style.cssText = `
-                position: fixed;
+                position: absolute;
                 bottom: 24px;
                 left: 50%;
                 transform: translateX(-50%);
-                display: none;
                 z-index: 1000;
                 width: auto;
                 height: auto;
@@ -2090,7 +2092,7 @@
                     height: 48px;
                     border: none;
                     border-radius: 50%;
-                    background: ${this.colorToRGBA(SCENE_CONFIG.hud.colors.primary, 0.2)};
+                    background: #9900ff33;
                     color: white;
                     font-size: 24px;
                     display: flex;
@@ -2106,21 +2108,21 @@
                     -webkit-user-select: none;
                     backdrop-filter: blur(4px);
                     -webkit-backdrop-filter: blur(4px);
-                    box-shadow: 0 0 10px ${this.colorToRGBA(SCENE_CONFIG.hud.colors.primary, 0.3)};
+                    box-shadow: 0 0 10px #9900ff55;
                     transition: transform 0.1s ease, background-color 0.1s ease;
                 `;
 
                 const startControl = (e) => {
                     e.preventDefault();
                     this.onKeyDown({ code: `Arrow${direction}` });
-                    button.style.background = this.colorToRGBA(SCENE_CONFIG.hud.colors.primary, 0.4);
+                    button.style.background = '#9900ff66';
                     button.style.transform = 'scale(0.95)';
                 };
 
                 const endControl = (e) => {
                     e.preventDefault();
                     this.onKeyUp({ code: `Arrow${direction}` });
-                    button.style.background = this.colorToRGBA(SCENE_CONFIG.hud.colors.primary, 0.2);
+                    button.style.background = '#9900ff33';
                     button.style.transform = 'scale(1)';
                 };
 
@@ -2154,7 +2156,11 @@
             mobileControls.appendChild(upButton);
             mobileControls.appendChild(rightButton);
 
-            document.body.appendChild(mobileControls);
+            // Append to the novaGridCanvas container instead of body
+            const container = document.getElementById('novaGridCanvas');
+            if (container) {
+                container.appendChild(mobileControls);
+            }
 
             // Update visibility on resize
             window.addEventListener('resize', () => {
@@ -3171,7 +3177,7 @@
             const hudContainer = document.createElement('div');
             hudContainer.id = 'hudContainer';
             hudContainer.style.cssText = `
-                position: fixed;
+                position: absolute;
                 top: 0;
                 left: 0;
                 width: 100%;
@@ -3186,7 +3192,7 @@
             speedIndicator.className = 'speed-indicator';
             speedIndicator.style.cssText = `
                 position: absolute;
-                bottom: ${SCENE_CONFIG.hud.bars.bottom.height + 20}px;
+                bottom: 100px;
                 left: 50%;
                 transform: translateX(-50%);
                 color: white;
@@ -3339,7 +3345,11 @@
             this.hudElements.speedIndicator = speedIndicator;
             this.hudElements.boostMeterFill = boostMeterFill;
 
-            document.body.appendChild(hudContainer);
+            // Instead of document.body.appendChild(hudContainer):
+            const container = document.getElementById('novaGridCanvas');
+            if (container) {
+                container.appendChild(hudContainer);
+            }
             this.hudContainer = hudContainer;
         }
 
@@ -3661,8 +3671,7 @@
         }
     });
 </script>
-            </div>
-        
+        </div>
     </main>
 
     <!-- Google tag (gtag.js) -->
