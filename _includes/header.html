@@ -1,4 +1,4 @@
-<header>
+<header class="{% if page.fixed_header %}fixed{% endif %}">
     <h2>
         {% if page.url != '/' %}
             <a href="{{ site.baseurl }}/"><i class="fa-solid fa-arrow-left"></i> /</a>
