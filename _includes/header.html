@@ -1,6 +1,9 @@
 <header>
-    {% if page.url != '/' %}
-        <a href="{{ site.baseurl }}/">&larr; back</a>
-    {% endif %}
-    <h2>/{{ page.title }}</h2>
+    <h2>
+        {% if page.url != '/' %}
+            <a href="{{ site.baseurl }}/"><i class="fa-solid fa-arrow-left"></i> /</a>
+        {% endif %}
+        {{ page.title }}
+    </h2>
+    <a href="https://blaze.design"><i class="fa-solid fa-house"></i> blaze.design</a>
 </header>

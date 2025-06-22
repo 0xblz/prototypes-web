@@ -6,6 +6,7 @@
     <title>{% if page.title %}{{ page.title }}{% else %}{{ site.title }}{% endif %}</title>
     <meta name="description" content="{% if page.description %}{{ page.description }}{% endif %}">
     <link rel="stylesheet" href="{{ site.baseurl }}/assets/css/main.css">
+    <script src="https://kit.fontawesome.com/53df3a2a07.js" crossorigin="anonymous"></script>
 </head>
 <body>
     <main>
@@ -17,7 +18,6 @@
         {% else %}
             {{ content }}
         {% endif %}
-        {% include footer.html %}
     </main>
 </body>
 </html> 
