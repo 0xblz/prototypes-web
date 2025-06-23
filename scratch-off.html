@@ -94,7 +94,7 @@ description: css + js scratch off reveal
       this.isDrawing = false;
       this.scratchedPixels = 0;
       this.totalPixels = 0;
-      this.scratchThreshold = 0.3; // 30% needs to be scratched
+      this.scratchThreshold = 0.4; // 40% needs to be scratched
       this.hasShownAlert = false; // Prevent multiple alerts
       
       this.init();
@@ -156,7 +156,7 @@ description: css + js scratch off reveal
       const y = e.offsetY || e.clientY - rect.top;
 
       this.ctx.globalCompositeOperation = 'destination-out';
-      this.ctx.lineWidth = 30;
+      this.ctx.lineWidth = 50;
       this.ctx.lineCap = 'round';
       this.ctx.lineJoin = 'round';
 
