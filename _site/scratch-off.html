@@ -56,6 +56,8 @@
     -webkit-user-select: none;
     -moz-user-select: none;
     -ms-user-select: none;
+    position: relative;
+    z-index: 3;
   }
 
   .scratch-overlay {
@@ -92,10 +94,88 @@
     text-align: center;
     white-space: nowrap;
   }
+
+  .holo-glow {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 200px;
+    height: 200px;
+    border-radius: 50%;
+    background: radial-gradient(circle, 
+      rgba(14, 164, 233, 0.8) 0%, 
+      rgba(93, 155, 255, 0.6) 30%, 
+      rgba(51, 127, 234, 0.4) 60%, 
+      rgba(14, 164, 233, 0.2) 80%, 
+      transparent 100%);
+    filter: blur(20px);
+    animation: holoPulse 3s ease-in-out infinite;
+    z-index: 2;
+  }
+
+  .holo-glow::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 180px;
+    height: 180px;
+    border-radius: 50%;
+    background: conic-gradient(
+      from 0deg,
+      rgba(14, 164, 233, 0.6),
+      rgba(59, 130, 246, 0.6),
+      rgba(51, 66, 234, 0.6),
+      rgba(14, 164, 233, 0.6)
+    );
+    filter: blur(15px);
+    animation: holoRotate 4s linear infinite;
+  }
+
+  .holo-glow::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 160px;
+    height: 160px;
+    border-radius: 50%;
+    background: radial-gradient(circle,
+      rgba(255, 255, 255, 0.3) 0%,
+      rgba(14, 164, 233, 0.2) 50%,
+      transparent 100%);
+    filter: blur(10px);
+    animation: holoShimmer 2s ease-in-out infinite alternate;
+  }
+
+  @keyframes holoPulse {
+    0%, 100% { 
+      opacity: 0.7; 
+      transform: translate(-50%, -50%) scale(1);
+    }
+    50% { 
+      opacity: 1; 
+      transform: translate(-50%, -50%) scale(1.1);
+    }
+  }
+
+  @keyframes holoRotate {
+    0% { transform: translate(-50%, -50%) rotate(0deg); }
+    100% { transform: translate(-50%, -50%) rotate(360deg); }
+  }
+
+  @keyframes holoShimmer {
+    0% { opacity: 0.3; transform: translate(-50%, -50%) scale(0.9); }
+    100% { opacity: 0.7; transform: translate(-50%, -50%) scale(1.1); }
+  }
 </style>
 
 <div class="scratch-container">
   <div class="diamond-reveal">
+    <div class="holo-glow"></div>
     <img src="assets/images/diamond.png" alt="Diamond" class="diamond-image">
   </div>
   <div class="scratch-overlay" id="scratchOverlay"></div>
