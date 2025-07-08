@@ -2,9 +2,7 @@
 body {
     font-family: 'DM Sans', sans-serif;
     font-size: 16px;
-    background-color: var(--primary-color);
-    background-image: radial-gradient(circle, rgba(255, 255, 255, 0.2) 1px, transparent 1px);
-    background-size: 1rem 1rem;
+    background-image: linear-gradient(to bottom, var(--primary-color), var(--tertiary-color));
     min-height: 100vh;
 }
 
@@ -21,10 +19,10 @@ main {
     align-items: center;
     flex-wrap: wrap;
     justify-content: space-between;
-    padding: 2rem;
+    padding: 1.5rem;
     gap: 1.5rem;
     width: 100%;
-    max-width: 720px;
+    max-width: 480px;
     color: white;
 }
 
@@ -44,14 +42,14 @@ main {
             align-items: center;
             flex-wrap: wrap;
             width: 100%;
-            border-bottom: 1px dashed rgba(255, 255, 255, 0.3);
             gap: 0.5rem;
-            padding: 0.75rem 0;
+            border-radius: 1.5rem;
+            padding: 0.75rem;
             
             &:hover,
             &:active {
                 transform: scale(1.05);
-                border-color: var(--secondary-color);
+                background-color: rgba(255, 255, 255, 0.05);
             }
         }
 
@@ -83,10 +81,10 @@ main {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    padding: 2rem;
+    padding: 1.5rem;
     width: 100%;
     height: 100%;
-    max-width: 720px;
+    max-width: 480px;
     border-radius: 3rem;
-    border: 2px dashed var(--secondary-color);
+    background-color: rgba(255, 255, 255, 0.05);
 }
