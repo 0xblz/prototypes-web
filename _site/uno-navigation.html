@@ -30,7 +30,7 @@
   background: black;
 }
 
-nav {
+.navigation {
   font-family: "Rubik", sans-serif;
   display: flex;
   gap: 4px;
@@ -44,7 +44,7 @@ nav {
   position: relative;
 }
 
-nav::after {
+.navigation::after {
   content: '';
   position: absolute;
   top: 0.75rem;
@@ -58,7 +58,7 @@ nav::after {
   transform: translateX(calc(var(--selected-tab, 0) * (var(--nav-width) - 24px)));
 }
 
-nav div {
+.navigation div {
   transition: all 0.15s ease-in-out;
   cursor: pointer;
   display: flex;
@@ -73,20 +73,20 @@ nav div {
   background: transparent;
 }
 
-nav div svg * {
+.navigation div svg * {
   animation-play-state: paused !important;
 }
 
-nav div.selected svg * {
+.navigation div.selected svg * {
   animation-play-state: running !important;
 }
 
-nav div:hover:not(.selected) {
+.navigation div:hover:not(.selected) {
   background: rgba(2, 132, 199, 0.3);
 }
 </style>
 
-<nav>
+<div class="navigation">
     <div class="selected">
         <?xml version="1.0" encoding="UTF-8" standalone="no"?>
         <!-- Created with Keyshape -->
@@ -163,24 +163,24 @@ nav div:hover:not(.selected) {
         </svg>                        
         Wallet
     </div>
-</nav>
+</div>
 
 <script>
-const tabs = document.querySelectorAll('nav div');
-const nav = document.querySelector('nav');
+const tabs = document.querySelectorAll('.navigation div');
+const navigation = document.querySelector('.navigation');
 
 // Set initial position of background
 const updateBackgroundPosition = (selectedTab) => {
-  const navRect = nav.getBoundingClientRect();
+  const navRect = navigation.getBoundingClientRect();
   const tabRect = selectedTab.getBoundingClientRect();
   const position = (tabRect.left - navRect.left - 12) / (navRect.width - 24);
-  nav.style.setProperty('--selected-tab', position);
+  navigation.style.setProperty('--selected-tab', position);
   document.documentElement.style.setProperty('--nav-width', `${navRect.width}px`);
 };
 
 // Update background position on window resize
 window.addEventListener('resize', () => {
-  const selectedTab = document.querySelector('nav div.selected');
+  const selectedTab = document.querySelector('.navigation div.selected');
   if (selectedTab) updateBackgroundPosition(selectedTab);
 });
 
@@ -204,7 +204,7 @@ tabs.forEach(tab => {
 });
 
 // Initialize background position
-updateBackgroundPosition(document.querySelector('nav div.selected'));
+updateBackgroundPosition(document.querySelector('.navigation div.selected'));
 </script>
             </div>
         
