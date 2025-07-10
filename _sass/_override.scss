@@ -1,0 +1,44 @@
+// Fonts
+@import url('https://blaze.design/assets/css/main.css');
+
+article {
+    gap: 0;
+}
+
+.preview {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    border-radius: 1.5rem;
+    padding: 1.5rem;
+    z-index: 3;
+    background-color: rgba(255, 255, 255, 0.1);
+    max-width: var(--container-width);
+    width: 100%;
+    margin-top: 1.5rem;
+}
+
+.dg, .ac {
+    z-index: 9!important;
+}
+
+a {
+    &.list-item {
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        transition: all 0.15s ease-in-out;
+        padding: 0.75rem 0;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+        width: 100%;
+        gap: 0.5rem;
+
+        &:hover,
+        &:active {
+            transform: scale(1.05);
+            border-color: white;
+        }
+    }
+}

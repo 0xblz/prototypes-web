@@ -11,10 +11,17 @@
 <body>
     <main>
         {% include header.html %}
-        <div class="page-container">
+
+        {% if page.prototype %}
+            <div class="preview">
+                {{ content }}
+            </div>
+        {% else %}
             {{ content }}
-        </div>
+        {% endif %}
     </main>
+
+    <script src="https://blaze.design/assets/js/bg.js"></script>
 
     <!-- Google tag (gtag.js) -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-355V4GHGSF"></script>
