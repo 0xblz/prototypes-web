@@ -1,0 +1,852 @@
+---
+layout: default
+title: wind vector
+description: three.js wind vector
+prototype: true
+---
+<style>
+.preview {
+    max-width: 1200px;
+    min-height: 320px;
+    padding: 0;
+    overflow: hidden;
+}
+canvas {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  flex: 1;
+}
+
+#mini-map-canvas {
+  position: absolute;
+  bottom: 20px;
+  left: 20px;
+  width: 200px;
+  height: 200px;
+  border: 2px solid red;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.8);
+  z-index: 10;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+#mini-map-canvas.visible {
+  opacity: 1;
+}
+
+@media (max-width: 768px) {
+  #mini-map-canvas {
+    width: 150px;
+    height: 150px;
+    bottom: 15px;
+    left: 15px;
+  }
+}
+</style>
+
+<canvas id="three-canvas"></canvas>
+<canvas id="mini-map-canvas"></canvas>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dat-gui/0.7.9/dat.gui.min.js"></script>
+
+<script>
+// 3D Wind Vector Visualization
+let scene, camera, renderer, controls;
+let windCubes = [];
+let flightLevelGroups = [];
+let groundPlane;
+let raycaster, mouse;
+let isHovering = false; // Track hover state
+let selectedFlightLevel = null; // Track selected flight level
+let selectedCubes = []; // Track selected cube outlines
+let mouseDownPosition = { x: 0, y: 0 }; // Track mouse down position
+let isDragging = false; // Track if user is dragging
+let gui; // dat.GUI instance
+let tooltip; // Tooltip element
+
+// Mini map variables
+let miniMapScene, miniMapCamera, miniMapRenderer;
+let miniMapCanvas;
+let miniMapGroundPlane;
+let miniMapCubes = [];
+
+// GUI settings
+const settings = {
+  region: 'Northeast',
+  cubeOpacity: 0.03, // Default/dimmed cube opacity
+  randomizeWind: function() {
+    regenerateWindData();
+  }
+};
+
+// Regional configurations
+const regions = {
+  'Northeast': {
+    mapUrl: 'https://tile.openstreetmap.org/5/9/12.png', // Northeast US
+    windPattern: 'nor_easter' // Nor'easter and Atlantic influence
+  },
+  'Southeast': {
+    mapUrl: 'https://tile.openstreetmap.org/5/8/13.png', // Southeast US  
+    windPattern: 'gulf_stream' // Gulf Stream and tropical influence
+  },
+  'Midwest': {
+    mapUrl: 'https://tile.openstreetmap.org/5/7/11.png', // Great Lakes region
+    windPattern: 'continental' // Continental and lake effect patterns
+  },
+  'Southwest': {
+    mapUrl: 'https://tile.openstreetmap.org/5/5/12.png', // Desert Southwest
+    windPattern: 'desert' // Desert thermal and mountain wave patterns
+  },
+  'Northwest': {
+    mapUrl: 'https://tile.openstreetmap.org/5/5/10.png', // Pacific Northwest
+    windPattern: 'pacific' // Pacific maritime influence
+  },
+  'Great Plains': {
+    mapUrl: 'https://tile.openstreetmap.org/5/7/12.png', // Central Plains
+    windPattern: 'plains' // Prairie winds and storm systems
+  }
+};
+
+// Initialize the scene
+function initScene() {
+  // Scene setup
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x001133); // Dark blue background
+
+  // Get canvas and set up responsive sizing
+  const canvas = document.getElementById('three-canvas');
+  const rect = canvas.getBoundingClientRect();
+  
+  // Camera setup
+  camera = new THREE.PerspectiveCamera(75, rect.width / rect.height, 0.1, 1000);
+  camera.position.set(15, 20, 15);
+  
+  // Renderer setup
+  renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
+  renderer.setSize(rect.width, rect.height);
+  // Removed shadow settings for cleaner transparent look
+
+  // Lighting - uniform brightness from all angles
+  const ambientLight = new THREE.AmbientLight(0xffffff, 1.0); // Bright white ambient light
+  scene.add(ambientLight);
+  
+  // Controls
+  controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.05;
+
+  // Raycaster for interactions
+  raycaster = new THREE.Raycaster();
+  mouse = new THREE.Vector2();
+
+  // Create ground plane
+  createGroundPlane();
+  
+  // Generate wind cubes
+  generateWindCubes();
+  
+  // Create flight level labels
+  createFlightLevelLabels();
+  
+  // Create GUI
+  createGUI();
+  
+  // Create tooltip
+  createTooltip();
+  
+  // Initialize mini map
+  initMiniMap();
+  
+  // Add event listeners
+  canvas.addEventListener('mousemove', onMouseMove);
+  canvas.addEventListener('mousedown', onMouseDown);
+  canvas.addEventListener('mouseup', onMouseUp);
+  canvas.addEventListener('click', onMouseClick);
+  
+  // Add touch event listeners for mobile support
+  canvas.addEventListener('touchstart', onTouchStart, { passive: false });
+  canvas.addEventListener('touchmove', onTouchMove, { passive: false });
+  canvas.addEventListener('touchend', onTouchEnd, { passive: false });
+  
+  window.addEventListener('resize', onWindowResize);
+}
+
+// Create dat.GUI interface
+function createGUI() {
+  gui = new dat.GUI();
+  
+  // Region selector
+  gui.add(settings, 'region', Object.keys(regions)).name('US Region').onChange(function(value) {
+    updateRegion(value);
+  });
+  
+  // Opacity control
+  gui.add(settings, 'cubeOpacity', 0.01, 0.2).name('Cube Opacity').onChange(function(value) {
+    updateCubeOpacity();
+  });
+  
+  // Wind randomization button
+  gui.add(settings, 'randomizeWind').name('Randomize Wind');
+}
+
+// Update region and regenerate data
+function updateRegion(regionName) {
+  settings.region = regionName;
+  updateGroundPlane(regions[regionName].mapUrl);
+  regenerateWindData();
+  updateMiniMap(); // Update mini map when region changes
+  updateMiniMapGroundPlane(); // Update mini map ground plane when region changes
+}
+
+// Regenerate wind data with current city pattern
+function regenerateWindData() {
+  // Clear existing cubes
+  windCubes.forEach(cube => {
+    scene.remove(cube);
+  });
+  windCubes = [];
+  
+  // Generate new cubes
+  generateWindCubes();
+}
+
+// Update ground plane with new map
+function updateGroundPlane(mapUrl) {
+  if (groundPlane) {
+    scene.remove(groundPlane);
+  }
+  
+  const geometry = new THREE.PlaneGeometry(20, 20);
+  const textureLoader = new THREE.TextureLoader();
+  
+  const texture = textureLoader.load(mapUrl, function(loadedTexture) {
+    console.log('Map texture loaded for', settings.region);
+  }, undefined, function(error) {
+    console.error('Failed to load map texture, using fallback', error);
+    const material = new THREE.MeshLambertMaterial({ color: 0x4a7c59 });
+    groundPlane.material = material;
+  });
+  
+  const material = new THREE.MeshLambertMaterial({ map: texture });
+  groundPlane = new THREE.Mesh(geometry, material);
+  groundPlane.rotation.x = -Math.PI / 2;
+  groundPlane.position.y = -1;
+  scene.add(groundPlane);
+}
+
+// Create ground plane with real map texture
+function createGroundPlane() {
+  const currentRegion = regions[settings.region];
+  updateGroundPlane(currentRegion.mapUrl);
+}
+
+// Generate 10x10x10 wind cube grid with region-specific patterns (10 flight levels)
+function generateWindCubes() {
+  const windPattern = regions[settings.region].windPattern;
+  
+  for (let x = -9; x <= 9; x += 2) { // Centered grid from -9 to 9
+    for (let y = 0; y < 10; y++) { // 10 flight levels
+      for (let z = -9; z <= 9; z += 2) { // Centered grid from -9 to 9
+        // Map y levels to standard flight levels FL050-FL500 in increments of 50
+        const flightLevel = 50 + (y * 50); // FL050, FL100, FL150, ... FL500
+        
+        // Generate wind speed based on regional pattern
+        let speed = getWindSpeedForPattern(windPattern, x, y * 2, z); // Scale y for pattern
+        
+        createWindCube(x, y * 2, z, Math.round(speed), flightLevel); // Space cubes 2 units apart vertically
+      }
+    }
+  }
+  groupCubesByFlightLevel();
+}
+
+// Get wind speed based on region-specific patterns
+function getWindSpeedForPattern(pattern, x, y, z) {
+  const baseSpeed = 10 + (y * 2.5); // Speed increases with altitude
+  let speed = baseSpeed;
+  
+  switch(pattern) {
+    case 'nor_easter':
+      // Northeast: Strong easterly flows, coastal influence
+      speed += (x + 10) * 1.8 + Math.sin(z * 0.4) * 8 + Math.random() * 18 - 9;
+      break;
+    case 'gulf_stream':
+      // Southeast: Tropical patterns, gulf moisture influence
+      const coastalEffect = Math.sin((z + 10) * 0.3) * 12;
+      speed += coastalEffect + Math.random() * 16 - 8;
+      break;
+    case 'continental':
+      // Midwest: Variable continental patterns, lake effects
+      const lakeEffect = Math.cos(x * 0.6) * Math.sin(z * 0.5) * 15;
+      speed += lakeEffect + Math.random() * 22 - 11;
+      break;
+    case 'desert':
+      // Southwest: Thermal updrafts, mountain wave patterns
+      const thermalEffect = Math.abs(x) + Math.abs(z);
+      speed += thermalEffect * 0.8 + Math.sin(y * 0.4) * 10 + Math.random() * 14 - 7;
+      break;
+    case 'pacific':
+      // Northwest: Strong westerly flow, marine layer influence
+      speed += (10 - x) * 2.0 + Math.cos(y * 0.3) * 6 + Math.random() * 16 - 8;
+      break;
+    case 'plains':
+      // Great Plains: Prairie winds, storm system influence
+      const stormEffect = Math.sin((x + z) * 0.4) * 12;
+      speed += stormEffect + (Math.random() * 25 - 12.5);
+      break;
+  }
+  
+  return Math.max(5, Math.min(100, speed));
+}
+
+// Create individual wind cube
+function createWindCube(x, y, z, speed, flightLevel) {
+  const geometry = new THREE.BoxGeometry(2, 2, 2); // Proper 2x2x2 cubes
+  
+  // Better color mapping based on wind speed
+  let color;
+  if (speed < 20) {
+    color = 0x00AA00; // Dark green - calm
+  } else if (speed < 35) {
+    color = 0x66FF66; // Light green - light
+  } else if (speed < 50) {
+    color = 0xFFFF00; // Yellow - moderate
+  } else if (speed < 65) {
+    color = 0xFF8800; // Orange - strong
+  } else {
+    color = 0xFF0000; // Red - very strong
+  }
+  
+  const material = new THREE.MeshLambertMaterial({ 
+    color: color,
+    transparent: true,
+    opacity: settings.cubeOpacity // Use GUI setting for default opacity
+  });
+  
+  const cube = new THREE.Mesh(geometry, material);
+  cube.position.set(x, y, z);
+  // Removed shadow casting for cleaner transparent look
+  cube.userData = { 
+    speed: speed, 
+    flightLevel: flightLevel,
+    yLevel: y / 2 // Adjust for hover grouping
+  };
+  
+  scene.add(cube);
+  windCubes.push(cube);
+}
+
+// Group cubes by flight level
+function groupCubesByFlightLevel() {
+  const flightLevels = {};
+  
+  windCubes.forEach(cube => {
+    const fl = cube.userData.yLevel; // Group by y level for interaction
+    if (!flightLevels[fl]) {
+      flightLevels[fl] = [];
+    }
+    flightLevels[fl].push(cube);
+  });
+  
+  flightLevelGroups = Object.values(flightLevels);
+}
+
+// Create flight level labels
+function createFlightLevelLabels() {
+  // Show labels at each flight level (every 2 y-units = 50 flight level increment)
+  for (let y = 0; y < 20; y += 2) {
+    const flightLevel = 50 + ((y / 2) * 50);
+    const flStr = String(flightLevel).padStart(3, '0');
+    createTextSprite(`FL${flStr}`, 11, y, 0);
+  }
+  
+  // Add compass directions on the ground plane
+  createCompassLabels();
+}
+
+// Create compass direction labels
+function createCompassLabels() {
+  // N, S, E, W labels around the ground plane edges
+  createTextSprite('N', 0, 0, -11);  // North - negative Z (away from viewer)
+  createTextSprite('S', 0, 0, 11);   // South - positive Z (toward viewer)
+  createTextSprite('E', 11, 0, 0);   // East - positive X
+  createTextSprite('W', -11, 0, 0);  // West - negative X
+}
+
+// Create text sprite for labels
+function createTextSprite(text, x, y, z) {
+  const canvas = document.createElement('canvas');
+  const context = canvas.getContext('2d');
+  canvas.width = 256;
+  canvas.height = 64;
+  
+  context.fillStyle = 'rgba(0, 0, 0, 0.8)';
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  
+  context.fillStyle = 'white';
+  context.font = '24px Geist, system-ui, sans-serif';
+  context.textAlign = 'center';
+  context.fillText(text, canvas.width / 2, 40);
+  
+  const texture = new THREE.CanvasTexture(canvas);
+  const material = new THREE.SpriteMaterial({ map: texture });
+  const sprite = new THREE.Sprite(material);
+  
+  sprite.position.set(x, y, z);
+  sprite.scale.set(4, 1, 1);
+  scene.add(sprite);
+}
+
+// Create tooltip element
+function createTooltip() {
+  tooltip = document.createElement('div');
+  tooltip.style.position = 'absolute';
+  tooltip.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
+  tooltip.style.color = 'white';
+  tooltip.style.padding = '8px 12px';
+  tooltip.style.borderRadius = '4px';
+  tooltip.style.fontSize = '14px';
+  tooltip.style.fontFamily = 'Geist, system-ui, sans-serif';
+  tooltip.style.pointerEvents = 'none';
+  tooltip.style.zIndex = '1000';
+  tooltip.style.display = 'none';
+  tooltip.style.whiteSpace = 'nowrap';
+  document.body.appendChild(tooltip);
+}
+
+// Initialize mini map
+function initMiniMap() {
+  miniMapCanvas = document.getElementById('mini-map-canvas');
+  
+  // Set up mini map scene
+  miniMapScene = new THREE.Scene();
+  miniMapScene.background = new THREE.Color(0x001133);
+  
+  // Set up orthographic camera for top-down view
+  miniMapCamera = new THREE.OrthographicCamera(-10, 10, 10, -10, 0.1, 100);
+  miniMapCamera.position.set(0, 50, 0);
+  miniMapCamera.lookAt(0, 0, 0);
+  
+  // Set up mini map renderer
+  miniMapRenderer = new THREE.WebGLRenderer({ canvas: miniMapCanvas, antialias: true });
+  miniMapRenderer.setSize(200, 200);
+  
+  // Add lighting
+  const miniMapLight = new THREE.AmbientLight(0xffffff, 1.0);
+  miniMapScene.add(miniMapLight);
+  
+  // Create ground plane for mini map
+  const miniMapGeometry = new THREE.PlaneGeometry(20, 20);
+  const miniMapTextureLoader = new THREE.TextureLoader();
+  
+  const currentRegion = regions[settings.region];
+  const texture = miniMapTextureLoader.load(currentRegion.mapUrl);
+  const miniMapMaterial = new THREE.MeshLambertMaterial({ map: texture });
+  miniMapGroundPlane = new THREE.Mesh(miniMapGeometry, miniMapMaterial);
+  miniMapGroundPlane.rotation.x = -Math.PI / 2;
+  miniMapGroundPlane.position.y = -1;
+  miniMapScene.add(miniMapGroundPlane);
+}
+
+// Update mini map when flight level is selected
+function updateMiniMap() {
+  if (!miniMapRenderer) return;
+  
+  const miniMapCanvasElement = document.getElementById('mini-map-canvas');
+  
+  if (selectedFlightLevel !== null) {
+    // Show mini map
+    miniMapCanvasElement.classList.add('visible');
+    
+    // Clear existing mini map cubes
+    miniMapCubes.forEach(cube => {
+      miniMapScene.remove(cube);
+    });
+    miniMapCubes = [];
+    
+    // Add selected flight level cubes to mini map
+    windCubes.forEach(cube => {
+      if (cube.userData.yLevel === selectedFlightLevel) {
+        const miniCube = cube.clone();
+        miniCube.position.copy(cube.position);
+        miniCube.position.y = 0; // Flatten to ground level for top view
+        miniCube.material = cube.material.clone();
+        miniCube.material.opacity = 0.4; // Reduced opacity to see map better
+        miniMapScene.add(miniCube);
+        miniMapCubes.push(miniCube);
+      }
+    });
+  } else {
+    // Hide mini map
+    miniMapCanvasElement.classList.remove('visible');
+  }
+}
+
+// Update mini map ground plane when region changes
+function updateMiniMapGroundPlane() {
+  if (!miniMapGroundPlane) return;
+  
+  const currentRegion = regions[settings.region];
+  const textureLoader = new THREE.TextureLoader();
+  
+  const texture = textureLoader.load(currentRegion.mapUrl, function(loadedTexture) {
+    miniMapGroundPlane.material.map = loadedTexture;
+    miniMapGroundPlane.material.needsUpdate = true;
+  });
+}
+
+// Handle mouse movement for interactions
+function onMouseMove(event) {
+  const canvas = renderer.domElement;
+  const rect = canvas.getBoundingClientRect();
+  
+  mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+  mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+  
+  raycaster.setFromCamera(mouse, camera);
+  const intersects = raycaster.intersectObjects(windCubes);
+  
+  if (intersects.length > 0) {
+    const hoveredCube = intersects[0].object;
+    const hoveredYLevel = hoveredCube.userData.yLevel;
+    const flightLevel = hoveredCube.userData.flightLevel;
+    const windSpeed = hoveredCube.userData.speed;
+    isHovering = true;
+    
+    // Change cursor to pointer when hovering over cubes
+    canvas.style.cursor = 'pointer';
+    
+    // Show tooltip with flight level info
+    tooltip.style.display = 'block';
+    tooltip.style.left = (event.clientX + 10) + 'px';
+    tooltip.style.top = (event.clientY - 10) + 'px';
+    
+    // Calculate grid coordinates (convert from world position to grid reference)
+    const gridX = Math.round((hoveredCube.position.x + 9) / 2);
+    const gridZ = Math.round((hoveredCube.position.z + 9) / 2);
+    
+    tooltip.innerHTML = `FL${String(flightLevel).padStart(3, '0')}<br/>Wind: ${windSpeed} kt<br/>Grid: ${gridX}, ${gridZ}`;
+    
+    // Apply hover effects
+    windCubes.forEach(cube => {
+      if (cube.userData.yLevel === selectedFlightLevel) {
+        // Keep selected level bright
+        cube.material.opacity = 0.5;
+      } else if (cube.userData.yLevel === hoveredYLevel) {
+        // Highlight hovered level (preview)
+        cube.material.opacity = 0.4;
+      } else {
+        // Dim other levels using GUI setting
+        cube.material.opacity = settings.cubeOpacity;
+      }
+    });
+  } else {
+    isHovering = false;
+    
+    // Change cursor to move when not hovering over cubes (orbit mode)
+    canvas.style.cursor = 'move';
+    
+    // Hide tooltip
+    tooltip.style.display = 'none';
+    
+    // Restore selection state or default opacity
+    if (selectedFlightLevel !== null) {
+      // Restore selection state
+      windCubes.forEach(cube => {
+        if (cube.userData.yLevel === selectedFlightLevel) {
+          cube.material.opacity = 0.5; // Keep selected level bright
+        } else {
+          cube.material.opacity = settings.cubeOpacity; // Use GUI setting
+        }
+      });
+    }
+    // If no selection, opacity will be handled by distance calculation in animate()
+  }
+}
+
+// Handle mouse down to track drag start
+function onMouseDown(event) {
+  mouseDownPosition.x = event.clientX;
+  mouseDownPosition.y = event.clientY;
+  isDragging = false;
+}
+
+// Handle mouse up to detect drag vs click
+function onMouseUp(event) {
+  const deltaX = Math.abs(event.clientX - mouseDownPosition.x);
+  const deltaY = Math.abs(event.clientY - mouseDownPosition.y);
+  const dragThreshold = 5; // pixels
+  
+  isDragging = deltaX > dragThreshold || deltaY > dragThreshold;
+}
+
+// Handle mouse clicks for selection
+function onMouseClick(event) {
+  // Only process click if it wasn't a drag (orbit controls)
+  if (isDragging) {
+    return;
+  }
+  
+  const canvas = renderer.domElement;
+  const rect = canvas.getBoundingClientRect();
+  
+  mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+  mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+  
+  raycaster.setFromCamera(mouse, camera);
+  const intersects = raycaster.intersectObjects(windCubes);
+  
+  if (intersects.length > 0) {
+    const clickedCube = intersects[0].object;
+    const clickedYLevel = clickedCube.userData.yLevel;
+    
+    // If clicking the same level, deselect
+    if (selectedFlightLevel === clickedYLevel) {
+      deselectFlightLevel();
+    } else {
+      selectFlightLevel(clickedYLevel);
+    }
+  }
+  // Removed background deselection - only cube clicks affect selection
+}
+
+// Touch event handlers for mobile support
+function onTouchStart(event) {
+  event.preventDefault(); // Prevent default touch behaviors like scrolling
+  
+  if (event.touches.length === 1) {
+    const touch = event.touches[0];
+    mouseDownPosition.x = touch.clientX;
+    mouseDownPosition.y = touch.clientY;
+    isDragging = false;
+  }
+}
+
+function onTouchMove(event) {
+  event.preventDefault(); // Prevent default touch behaviors like scrolling
+  
+  if (event.touches.length === 1) {
+    const touch = event.touches[0];
+    const canvas = renderer.domElement;
+    const rect = canvas.getBoundingClientRect();
+    
+    mouse.x = ((touch.clientX - rect.left) / rect.width) * 2 - 1;
+    mouse.y = -((touch.clientY - rect.top) / rect.height) * 2 + 1;
+    
+    raycaster.setFromCamera(mouse, camera);
+    const intersects = raycaster.intersectObjects(windCubes);
+    
+    if (intersects.length > 0) {
+      const hoveredCube = intersects[0].object;
+      const hoveredYLevel = hoveredCube.userData.yLevel;
+      const flightLevel = hoveredCube.userData.flightLevel;
+      const windSpeed = hoveredCube.userData.speed;
+      isHovering = true;
+      
+      // Show tooltip with flight level info
+      tooltip.style.display = 'block';
+      tooltip.style.left = (touch.clientX + 10) + 'px';
+      tooltip.style.top = (touch.clientY - 10) + 'px';
+      
+      // Calculate grid coordinates (convert from world position to grid reference)
+      const gridX = Math.round((hoveredCube.position.x + 9) / 2);
+      const gridZ = Math.round((hoveredCube.position.z + 9) / 2);
+      
+      tooltip.innerHTML = `FL${String(flightLevel).padStart(3, '0')}<br/>Wind: ${windSpeed} kt<br/>Grid: ${gridX}, ${gridZ}`;
+      
+      // Apply hover effects
+      windCubes.forEach(cube => {
+        if (cube.userData.yLevel === selectedFlightLevel) {
+          // Keep selected level bright
+          cube.material.opacity = 0.5;
+        } else if (cube.userData.yLevel === hoveredYLevel) {
+          // Highlight hovered level (preview)
+          cube.material.opacity = 0.4;
+        } else {
+          // Dim other levels using GUI setting
+          cube.material.opacity = settings.cubeOpacity;
+        }
+      });
+    } else {
+      isHovering = false;
+      
+      // Hide tooltip
+      tooltip.style.display = 'none';
+      
+      // Restore selection state or default opacity
+      if (selectedFlightLevel !== null) {
+        // Restore selection state
+        windCubes.forEach(cube => {
+          if (cube.userData.yLevel === selectedFlightLevel) {
+            cube.material.opacity = 0.5; // Keep selected level bright
+          } else {
+            cube.material.opacity = settings.cubeOpacity; // Use GUI setting
+          }
+        });
+      }
+    }
+  }
+}
+
+function onTouchEnd(event) {
+  event.preventDefault(); // Prevent default touch behaviors like scrolling
+  
+  if (event.changedTouches.length === 1) {
+    const touch = event.changedTouches[0];
+    const deltaX = Math.abs(touch.clientX - mouseDownPosition.x);
+    const deltaY = Math.abs(touch.clientY - mouseDownPosition.y);
+    const dragThreshold = 5; // pixels
+    
+    isDragging = deltaX > dragThreshold || deltaY > dragThreshold;
+    
+    // Only process tap if it wasn't a drag (orbit controls)
+    if (!isDragging) {
+      const canvas = renderer.domElement;
+      const rect = canvas.getBoundingClientRect();
+      
+      mouse.x = ((touch.clientX - rect.left) / rect.width) * 2 - 1;
+      mouse.y = -((touch.clientY - rect.top) / rect.height) * 2 + 1;
+      
+      raycaster.setFromCamera(mouse, camera);
+      const intersects = raycaster.intersectObjects(windCubes);
+      
+      if (intersects.length > 0) {
+        const tappedCube = intersects[0].object;
+        const tappedYLevel = tappedCube.userData.yLevel;
+        
+        // If tapping the same level, deselect
+        if (selectedFlightLevel === tappedYLevel) {
+          deselectFlightLevel();
+        } else {
+          selectFlightLevel(tappedYLevel);
+        }
+      }
+    }
+    
+    // Always hide tooltip when touch ends
+    tooltip.style.display = 'none';
+    isHovering = false;
+    
+    // Restore proper opacity state
+    if (selectedFlightLevel !== null) {
+      windCubes.forEach(cube => {
+        if (cube.userData.yLevel === selectedFlightLevel) {
+          cube.material.opacity = 0.5;
+        } else {
+          cube.material.opacity = settings.cubeOpacity;
+        }
+      });
+    }
+  }
+}
+
+// Select a flight level
+function selectFlightLevel(yLevel) {
+  // Clear previous selection
+  deselectFlightLevel();
+  
+  selectedFlightLevel = yLevel;
+  
+  // Add white wireframes to selected cubes and set opacity
+  windCubes.forEach(cube => {
+    if (cube.userData.yLevel === yLevel) {
+      cube.material.opacity = 0.5; // Highlight selected level
+      
+      // Add white wireframe outline
+      const wireframeGeometry = new THREE.BoxGeometry(2, 2, 2);
+      const wireframeMaterial = new THREE.MeshBasicMaterial({
+        color: 0xffffff,
+        wireframe: true,
+        transparent: true,
+        opacity: 0.8
+      });
+      const wireframe = new THREE.Mesh(wireframeGeometry, wireframeMaterial);
+      wireframe.position.copy(cube.position);
+      scene.add(wireframe);
+      selectedCubes.push(wireframe);
+    } else {
+      cube.material.opacity = settings.cubeOpacity; // Use GUI setting for dimmed levels
+    }
+  });
+  updateMiniMap(); // Update mini map when flight level is selected
+}
+
+// Deselect current flight level
+function deselectFlightLevel() {
+  selectedFlightLevel = null;
+  
+  // Remove all wireframes
+  selectedCubes.forEach(wireframe => {
+    scene.remove(wireframe);
+  });
+  selectedCubes = [];
+  
+  // Reset all cube opacities to default
+  windCubes.forEach(cube => {
+    cube.material.opacity = settings.cubeOpacity; // Use GUI setting
+  });
+  updateMiniMap(); // Update mini map when flight level is deselected
+}
+
+// Handle window resize
+function onWindowResize() {
+  const canvas = renderer.domElement;
+  const rect = canvas.getBoundingClientRect();
+  
+  camera.aspect = rect.width / rect.height;
+  camera.updateProjectionMatrix();
+  renderer.setSize(rect.width, rect.height);
+}
+
+// Animation loop
+function animate() {
+  requestAnimationFrame(animate);
+  
+  // Update controls
+  controls.update();
+  
+  // Update cube opacity based on camera distance only when not hovering and not selected
+  if (!isHovering && selectedFlightLevel === null) {
+    const cameraPosition = camera.position;
+    windCubes.forEach(cube => {
+      const distance = cameraPosition.distanceTo(cube.position);
+      const opacity = Math.max(0.02, Math.min(settings.cubeOpacity, (80 - distance) / 80)); // Use GUI setting as max
+      cube.material.opacity = opacity;
+    });
+  }
+  
+  // Render main scene
+  renderer.render(scene, camera);
+  
+  // Render mini map if visible
+  if (miniMapRenderer && selectedFlightLevel !== null) {
+    miniMapRenderer.render(miniMapScene, miniMapCamera);
+  }
+}
+
+// Update cube opacity based on GUI setting
+function updateCubeOpacity() {
+  // Only update if no specific hover/selection state is active
+  if (!isHovering && selectedFlightLevel === null) {
+    windCubes.forEach(cube => {
+      cube.material.opacity = settings.cubeOpacity;
+    });
+  } else if (selectedFlightLevel !== null) {
+    // Update dimmed cubes in selection state
+    windCubes.forEach(cube => {
+      if (cube.userData.yLevel !== selectedFlightLevel) {
+        cube.material.opacity = settings.cubeOpacity;
+      }
+    });
+  }
+}
+
+// Start the visualization
+initScene();
+animate(); 
+</script>
