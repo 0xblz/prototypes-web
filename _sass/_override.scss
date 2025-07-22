@@ -40,6 +40,7 @@ article {
     max-width: var(--container-width);
     width: 100%;
     margin-top: 1.5rem;
+    overflow: hidden;
 }
 
 // dat.gui and acsset override

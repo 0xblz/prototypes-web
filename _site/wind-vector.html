@@ -29,7 +29,6 @@
     max-width: 1200px;
     min-height: 320px;
     padding: 0;
-    overflow: hidden;
 }
 
 canvas {
@@ -52,6 +51,7 @@ canvas {
   pointer-events: none;
   opacity: 0;
   transition: opacity 0.3s ease;
+  box-shadow: 0 0 2rem 0 rgba(0, 0, 0, 0.4);
 }
 
 #mini-map-canvas.visible {
@@ -137,7 +137,7 @@ const regions = {
 function initScene() {
   // Scene setup
   scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x001133); // Dark blue background
+  scene.background = new THREE.Color(0xDBDDEB); // Dark blue background
 
   // Get canvas and set up responsive sizing
   const canvas = document.getElementById('three-canvas');
