@@ -51,6 +51,7 @@ When creating new prototypes, follow these patterns:
 - **Standard structure**: Front matter → `<style>` → HTML → optional `<script>`
 - **Responsive design**: Consider mobile-friendly sizing and layouts
 - **External assets**: Use CDN links for libraries like Three.js, or reference local assets in `/assets/`
+- **Three.js template**: For Three.js prototypes, copy `test.html` and rename it for your new experiment. It includes basic Three.js setup with canvas element, OrbitControls for camera interaction, dat.GUI for parameter controls, and responsive styling for the canvas container.
 
 The goal is rapid prototyping and experimentation, not production-ready code.
 
