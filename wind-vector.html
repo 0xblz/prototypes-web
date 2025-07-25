@@ -1246,32 +1246,32 @@ function onMouseMove(event) {
     
     tooltip.innerHTML = `FL${String(flightLevel).padStart(3, '0')}<br/>Wind: ${windSpeed} kt @ ${windDirection}°<br/>Grid: ${gridX}, ${gridZ}`;
     
-    // Apply hover effects
-    windCubes.forEach(cube => {
-      let targetOpacity;
-      if (cube.userData.yLevel === selectedFlightLevel) {
-        // Keep selected level bright
-        targetOpacity = 0.5;
-      } else if (cube.userData.yLevel === hoveredYLevel) {
-        // Highlight hovered level (preview)
-        targetOpacity = 0.4;
-      } else {
-        // Dim other levels using GUI setting
-        targetOpacity = settings.cubeOpacity;
-      }
+    // Only apply hover effects if no flight level is currently selected
+    if (selectedFlightLevel === null) {
+      // Apply hover effects
+      windCubes.forEach(cube => {
+        let targetOpacity;
+        if (cube.userData.yLevel === hoveredYLevel) {
+          // Highlight hovered level (preview)
+          targetOpacity = 0.4;
+        } else {
+          // Dim other levels using GUI setting
+          targetOpacity = settings.cubeOpacity;
+        }
+        
+        cube.material.opacity = targetOpacity;
+      });
       
-      cube.material.opacity = targetOpacity;
-    });
-    
-    // Show arrows for hovered level (only if arrows are enabled)
-    windArrows.forEach(arrow => {
-      if (settings.showWindArrows && arrow.userData.yLevel === hoveredYLevel) {
-        arrow.visible = true;
-      } else if (arrow.userData.yLevel !== selectedFlightLevel || !settings.showWindArrows) {
-        // Hide arrows for non-selected, non-hovered levels or if arrows disabled
-        arrow.visible = false;
-      }
-    });
+      // Show arrows for hovered level (only if arrows are enabled and no selection)
+      windArrows.forEach(arrow => {
+        if (settings.showWindArrows && arrow.userData.yLevel === hoveredYLevel) {
+          arrow.visible = true;
+        } else {
+          arrow.visible = false;
+        }
+      });
+    }
+    // If a flight level is selected, maintain current visual state (no hover effects)
   } else {
     isHovering = false;
     
@@ -1281,31 +1281,18 @@ function onMouseMove(event) {
     // Hide tooltip
     tooltip.style.display = 'none';
     
-    // Restore selection state or default opacity
+    // Restore appropriate state based on whether a flight level is selected
     if (selectedFlightLevel !== null) {
-      // Restore selection state
-      windCubes.forEach(cube => {
-        let targetOpacity;
-        if (cube.userData.yLevel === selectedFlightLevel) {
-          targetOpacity = 0.5; // Keep selected level bright
-        } else {
-          targetOpacity = settings.cubeOpacity; // Use GUI setting
-        }
-        
-        cube.material.opacity = targetOpacity;
-      });
-      
-      // Show arrows only for selected level when not hovering (if enabled)
-      windArrows.forEach(arrow => {
-        arrow.visible = settings.showWindArrows && arrow.userData.yLevel === selectedFlightLevel;
-      });
+      // Maintain selection state (no changes needed - selection is locked)
+      // Visual state should remain as it was when selection was made
     } else {
+      // No selection - restore default hover-off state
       // Hide all arrows when no selection and not hovering
       windArrows.forEach(arrow => {
         arrow.visible = false;
       });
+      // Opacity will be handled by distance calculation in animate()
     }
-    // If no selection, opacity will be handled by distance calculation in animate()
   }
 }
 
@@ -1409,32 +1396,32 @@ function onTouchMove(event) {
       
       tooltip.innerHTML = `FL${String(flightLevel).padStart(3, '0')}<br/>Wind: ${windSpeed} kt @ ${windDirection}°<br/>Grid: ${gridX}, ${gridZ}`;
       
-      // Apply hover effects
-      windCubes.forEach(cube => {
-        let targetOpacity;
-        if (cube.userData.yLevel === selectedFlightLevel) {
-          // Keep selected level bright
-          targetOpacity = 0.5;
-        } else if (cube.userData.yLevel === hoveredYLevel) {
-          // Highlight hovered level (preview)
-          targetOpacity = 0.4;
-        } else {
-          // Dim other levels using GUI setting
-          targetOpacity = settings.cubeOpacity;
-        }
+      // Only apply hover effects if no flight level is currently selected
+      if (selectedFlightLevel === null) {
+        // Apply hover effects
+        windCubes.forEach(cube => {
+          let targetOpacity;
+          if (cube.userData.yLevel === hoveredYLevel) {
+            // Highlight hovered level (preview)
+            targetOpacity = 0.4;
+          } else {
+            // Dim other levels using GUI setting
+            targetOpacity = settings.cubeOpacity;
+          }
+          
+          cube.material.opacity = targetOpacity;
+        });
         
-        cube.material.opacity = targetOpacity;
-      });
-      
-      // Show arrows for hovered level (only if arrows are enabled)
-      windArrows.forEach(arrow => {
-        if (settings.showWindArrows && arrow.userData.yLevel === hoveredYLevel) {
-          arrow.visible = true;
-        } else if (arrow.userData.yLevel !== selectedFlightLevel || !settings.showWindArrows) {
-          // Hide arrows for non-selected, non-hovered levels or if arrows disabled
-          arrow.visible = false;
-        }
-      });
+        // Show arrows for hovered level (only if arrows are enabled and no selection)
+        windArrows.forEach(arrow => {
+          if (settings.showWindArrows && arrow.userData.yLevel === hoveredYLevel) {
+            arrow.visible = true;
+          } else {
+            arrow.visible = false;
+          }
+        });
+      }
+      // If a flight level is selected, maintain current visual state (no hover effects)
     } else {
       isHovering = false;
       
@@ -1510,23 +1497,10 @@ function onTouchEnd(event) {
     
     // Restore proper opacity state
     if (selectedFlightLevel !== null) {
-      windCubes.forEach(cube => {
-        let targetOpacity;
-        if (cube.userData.yLevel === selectedFlightLevel) {
-          targetOpacity = 0.5;
-        } else {
-          targetOpacity = settings.cubeOpacity;
-        }
-        
-        cube.material.opacity = targetOpacity;
-      });
-      
-      // Show arrows only for selected level (if enabled)
-      windArrows.forEach(arrow => {
-        arrow.visible = settings.showWindArrows && arrow.userData.yLevel === selectedFlightLevel;
-      });
+      // Maintain selection state (locked - no changes)
+      // Visual state should remain as it was when selection was made
     } else {
-      // Hide all arrows when no selection
+      // No selection - restore default state
       windArrows.forEach(arrow => {
         arrow.visible = false;
       });
@@ -1711,6 +1685,7 @@ function animate() {
       cube.material.opacity = opacity;
     });
   }
+  // When a flight level is selected, maintain the locked visual state (no distance-based opacity changes)
   
   // Animate wind arrows for more dynamic flow
   const time = Date.now() * 0.001; // Current time in seconds
@@ -1771,11 +1746,12 @@ function updateCubeOpacity() {
       cube.material.opacity = settings.cubeOpacity;
     });
   } else if (selectedFlightLevel !== null) {
-    // Update dimmed cubes in selection state
+    // Update dimmed cubes in locked selection state
     windCubes.forEach(cube => {
       if (cube.userData.yLevel !== selectedFlightLevel) {
         cube.material.opacity = settings.cubeOpacity;
       }
+      // Keep selected level bright (don't change its opacity)
     });
   }
 }
