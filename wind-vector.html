@@ -18,45 +18,81 @@ canvas {
   flex: 1;
 }
 
-#mini-map-canvas {
+#mini-map-container {
   position: absolute;
   bottom: 20px;
   left: 20px;
   width: 200px;
   height: 200px;
-  border: 4px solid #00ffff;
+  min-width: 150px;
+  min-height: 150px;
+  max-width: 400px;
+  max-height: 400px;
+  border: 4px solid white;
   border-radius: 8px;
   background: rgba(0, 0, 0, 0.8);
   z-index: 10;
-  pointer-events: none;
   opacity: 0;
   transition: opacity 0.3s ease;
-  box-shadow: 0 0 2rem 0 rgba(0, 255, 255, 0.4);
+  box-shadow: 0 0 2rem 0 white;
+  resize: both;
+  overflow: hidden;
 }
 
-#mini-map-canvas.visible {
+#mini-map-container.visible {
   opacity: 1;
 }
 
+#mini-map-canvas {
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  display: block;
+}
+
+#mini-map-resize-handle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 20px;
+  height: 20px;
+  background: linear-gradient(45deg, transparent 30%, white 30%, white 40%, transparent 40%, transparent 60%, white 60%, white 70%, transparent 70%);
+  cursor: se-resize;
+  pointer-events: auto;
+  border-top-right-radius: 4px;
+}
+
 @media (max-width: 768px) {
-  #mini-map-canvas {
+  #mini-map-container {
     width: 150px;
     height: 150px;
     bottom: 15px;
     left: 15px;
+    min-width: 120px;
+    min-height: 120px;
+    max-width: 300px;
+    max-height: 300px;
+  }
+  
+  #mini-map-resize-handle {
+    width: 16px;
+    height: 16px;
   }
 }
 
 #tooltip {
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
-  border: 1px solid rgba(0, 255, 255, 0.3);
-  box-shadow: 0 0 20px rgba(0, 255, 255, 0.2);
+  border: 2px solid white;
+  box-shadow: 0 0 20px white;
 }
 </style>
 
 <canvas id="three-canvas"></canvas>
-<canvas id="mini-map-canvas"></canvas>
+<div id="mini-map-container">
+  <canvas id="mini-map-canvas"></canvas>
+  <div id="mini-map-resize-handle"></div>
+</div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
@@ -79,8 +115,14 @@ let tooltip; // Tooltip element
 // Mini map variables
 let miniMapScene, miniMapCamera, miniMapRenderer;
 let miniMapCanvas;
+let miniMapContainer;
 let miniMapGroundPlane;
 let miniMapCubes = [];
+
+// Mini map resize variables
+let isResizing = false;
+let resizeStartSize = { width: 0, height: 0 };
+let resizeStartMouse = { x: 0, y: 0 };
 
 // GUI settings
 const settings = {
@@ -181,7 +223,19 @@ function initScene() {
   canvas.addEventListener('touchmove', onTouchMove, { passive: false });
   canvas.addEventListener('touchend', onTouchEnd, { passive: false });
   
+  // Add mini map resize event listeners
+  const resizeHandle = document.getElementById('mini-map-resize-handle');
+  resizeHandle.addEventListener('mousedown', onMiniMapResizeStart);
+  resizeHandle.addEventListener('touchstart', onMiniMapResizeStart, { passive: false });
+  
   window.addEventListener('resize', onWindowResize);
+  
+  // Add failsafe to reset resize state if user switches away
+  window.addEventListener('blur', function() {
+    if (isResizing) {
+      onMiniMapResizeEnd();
+    }
+  });
 }
 
 // Create dat.GUI interface
@@ -398,7 +452,7 @@ function createTooltip() {
   tooltip.id = 'tooltip';
   tooltip.style.position = 'absolute';
   tooltip.style.backgroundColor = 'rgba(0, 20, 40, 0.9)';
-  tooltip.style.color = '#00ffff';
+  tooltip.style.color = 'white';
   tooltip.style.padding = '8px 12px';
   tooltip.style.borderRadius = '6px';
   tooltip.style.fontSize = '14px';
@@ -407,8 +461,8 @@ function createTooltip() {
   tooltip.style.zIndex = '1000';
   tooltip.style.display = 'none';
   tooltip.style.whiteSpace = 'nowrap';
-  tooltip.style.border = '1px solid rgba(0, 255, 255, 0.3)';
-  tooltip.style.boxShadow = '0 0 20px rgba(0, 255, 255, 0.2)';
+  tooltip.style.border = '2px solid white';
+  tooltip.style.boxShadow = '0 0 20px white';
   tooltip.style.backdropFilter = 'blur(8px)';
   tooltip.style.webkitBackdropFilter = 'blur(8px)';
   document.body.appendChild(tooltip);
@@ -416,6 +470,7 @@ function createTooltip() {
 
 // Initialize mini map
 function initMiniMap() {
+  miniMapContainer = document.getElementById('mini-map-container');
   miniMapCanvas = document.getElementById('mini-map-canvas');
   
   // Set up mini map scene
@@ -429,7 +484,10 @@ function initMiniMap() {
   
   // Set up mini map renderer
   miniMapRenderer = new THREE.WebGLRenderer({ canvas: miniMapCanvas, antialias: true });
-  miniMapRenderer.setSize(200, 200);
+  
+  // Set initial size based on container
+  const containerRect = miniMapContainer.getBoundingClientRect();
+  miniMapRenderer.setSize(containerRect.width - 8, containerRect.height - 8); // Account for border
   
   // Add lighting
   const miniMapLight = new THREE.AmbientLight(0xffffff, 1.0);
@@ -454,7 +512,7 @@ function updateMiniMap() {
   
   if (selectedFlightLevel !== null) {
     // Show mini map
-    miniMapCanvas.classList.add('visible');
+    miniMapContainer.classList.add('visible');
     
     // Clear existing mini map cubes
     miniMapCubes.forEach(cube => {
@@ -476,7 +534,7 @@ function updateMiniMap() {
     });
   } else {
     // Hide mini map
-    miniMapCanvas.classList.remove('visible');
+    miniMapContainer.classList.remove('visible');
   }
 }
 
@@ -495,6 +553,11 @@ function updateMiniMapGroundPlane() {
 
 // Handle mouse movement for interactions
 function onMouseMove(event) {
+  // Skip if currently resizing mini map
+  if (isResizing) {
+    return;
+  }
+  
   const canvas = renderer.domElement;
   const rect = canvas.getBoundingClientRect();
   
@@ -586,6 +649,11 @@ function onMouseUp(event) {
 
 // Handle mouse clicks for selection
 function onMouseClick(event) {
+  // Skip if currently resizing mini map
+  if (isResizing) {
+    return;
+  }
+  
   // Only process click if it wasn't a drag (orbit controls)
   if (isDragging) {
     return;
@@ -751,6 +819,92 @@ function onTouchEnd(event) {
       });
     }
   }
+}
+
+// Mini map resize event handlers
+function onMiniMapResizeStart(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  
+  isResizing = true;
+  
+  const containerRect = miniMapContainer.getBoundingClientRect();
+  resizeStartSize.width = containerRect.width;
+  resizeStartSize.height = containerRect.height;
+  
+  if (event.type === 'mousedown') {
+    resizeStartMouse.x = event.clientX;
+    resizeStartMouse.y = event.clientY;
+    
+    document.addEventListener('mousemove', onMiniMapResize, true); // Use capture
+    document.addEventListener('mouseup', onMiniMapResizeEnd, true); // Use capture
+  } else if (event.type === 'touchstart') {
+    const touch = event.touches[0];
+    resizeStartMouse.x = touch.clientX;
+    resizeStartMouse.y = touch.clientY;
+    
+    document.addEventListener('touchmove', onMiniMapResize, { passive: false, capture: true });
+    document.addEventListener('touchend', onMiniMapResizeEnd, { capture: true });
+  }
+}
+
+function onMiniMapResize(event) {
+  if (!isResizing) return;
+  
+  event.preventDefault();
+  event.stopPropagation();
+  
+  let clientX, clientY;
+  if (event.type === 'mousemove') {
+    clientX = event.clientX;
+    clientY = event.clientY;
+  } else if (event.type === 'touchmove') {
+    const touch = event.touches[0];
+    clientX = touch.clientX;
+    clientY = touch.clientY;
+  }
+  
+  const deltaX = clientX - resizeStartMouse.x;
+  const deltaY = -(clientY - resizeStartMouse.y); // Invert Y because handle is at top
+  
+  // Use the larger delta to maintain 1:1 aspect ratio
+  const delta = Math.max(deltaX, deltaY);
+  
+  // Get constraints based on screen size
+  const isSmallScreen = window.innerWidth <= 768;
+  const minSize = isSmallScreen ? 120 : 150;
+  const maxSize = isSmallScreen ? 300 : 400;
+  
+  // Apply same size to both width and height (square aspect ratio)
+  const newSize = Math.max(minSize, Math.min(maxSize, resizeStartSize.width + delta));
+  
+  // Update container size
+  miniMapContainer.style.width = newSize + 'px';
+  miniMapContainer.style.height = newSize + 'px';
+  
+  // Update renderer size
+  miniMapRenderer.setSize(newSize - 8, newSize - 8); // Account for border
+}
+
+function onMiniMapResizeEnd(event) {
+  if (event) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+  
+  isResizing = false;
+  
+  // Remove event listeners with matching options
+  document.removeEventListener('mousemove', onMiniMapResize, true);
+  document.removeEventListener('mouseup', onMiniMapResizeEnd, true);
+  document.removeEventListener('touchmove', onMiniMapResize, { passive: false, capture: true });
+  document.removeEventListener('touchend', onMiniMapResizeEnd, { capture: true });
+  
+  // Failsafe: also remove without capture in case there was a mismatch
+  document.removeEventListener('mousemove', onMiniMapResize);
+  document.removeEventListener('mouseup', onMiniMapResizeEnd);
+  document.removeEventListener('touchmove', onMiniMapResize);
+  document.removeEventListener('touchend', onMiniMapResizeEnd);
 }
 
 // Select a flight level
