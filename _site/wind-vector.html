@@ -119,6 +119,7 @@ canvas {
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/utils/BufferGeometryUtils.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/dat-gui/0.7.9/dat.gui.min.js"></script>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -127,11 +128,13 @@ canvas {
 // 3D Wind Vector Visualization
 let scene, camera, renderer, controls;
 let windCubes = [];
+let windArrows = []; // Track wind direction arrows
 let groundPlane;
 let raycaster, mouse;
 let isHovering = false; // Track hover state
 let selectedFlightLevel = null; // Track selected flight level
 let selectedCubes = []; // Track selected cube outlines
+let arrowGeometry, arrowMaterial; // Reusable arrow geometry and material
 let mouseDownPosition = { x: 0, y: 0 }; // Track mouse down position
 let isDragging = false; // Track if user is dragging
 let gui; // dat.GUI instance
@@ -327,6 +330,9 @@ function initScene() {
 
   // Create ground plane
   createGroundPlane();
+  
+  // Create arrow geometry and material
+  createArrowGeometry();
   
   // Generate wind cubes
   generateWindCubes();
@@ -609,8 +615,95 @@ function regenerateWindData() {
   });
   windCubes = [];
   
-  // Generate new cubes
+  // Clear existing arrows
+  windArrows.forEach(arrow => {
+    scene.remove(arrow);
+  });
+  windArrows = [];
+  
+  // Generate new cubes and arrows
   generateWindCubes();
+}
+
+// Create reusable arrow geometry and material
+function createArrowGeometry() {
+  // Create streamlined arrow shape for wind flow visualization
+  const shaftGeometry = new THREE.CylinderGeometry(0.03, 0.06, 1.0, 8); // Tapered shaft
+  const headGeometry = new THREE.ConeGeometry(0.12, 0.3, 8); // Smaller, more streamlined head
+  
+  // Create arrow geometry by merging shaft and head
+  arrowGeometry = new THREE.BufferGeometry();
+  
+  // Create matrices for positioning
+  const shaftMatrix = new THREE.Matrix4();
+  const headMatrix = new THREE.Matrix4();
+  headMatrix.setPosition(0, 0.65, 0); // Position head at end of shaft
+  
+  // Merge geometries
+  const shaftGeo = shaftGeometry.clone().applyMatrix4(shaftMatrix);
+  const headGeo = headGeometry.clone().applyMatrix4(headMatrix);
+  
+  arrowGeometry = THREE.BufferGeometryUtils.mergeBufferGeometries([shaftGeo, headGeo]);
+  
+  // Create material - bright cyan with slight transparency for flowing effect
+  arrowMaterial = new THREE.MeshLambertMaterial({
+    color: 0x00ddff,
+    transparent: true,
+    opacity: 0.85
+  });
+}
+
+// Generate realistic wind direction based on position and regional patterns
+function generateWindDirection(x, y, z, windPattern) {
+  // Start with pure eastward direction for testing
+  let directionAngle = 0; // Degrees from east (0° = due east)
+  
+  // Add small regional wind pattern influences
+  switch(windPattern) {
+    case 'nor_easter':
+      // Northeast: Mostly easterly with slight variations
+      directionAngle = 0 + (z * 1); // Small variation
+      break;
+    case 'gulf_stream':
+      // Southeast: Mostly easterly
+      directionAngle = 0 + (x * 0.5);
+      break;
+    case 'continental':
+      // Midwest: Mostly easterly
+      directionAngle = 0 + (x + z) * 0.3;
+      break;
+    case 'desert':
+      // Southwest: Mostly easterly
+      directionAngle = 0 + Math.sin(x * 0.3) * 5;
+      break;
+    case 'pacific':
+      // Northwest: Mostly easterly for now
+      directionAngle = 0 + (z * 0.5);
+      break;
+    case 'plains':
+      // Great Plains: Mostly easterly
+      directionAngle = 0 + (x - z) * 0.3;
+      break;
+  }
+  
+  // Add small altitude effects
+  const altitudeEffect = (y * 0.5); // Small effect
+  directionAngle += altitudeEffect;
+  
+  // Add small randomness for realism
+  const timeSeed = currentDate.getTime() + currentTime.hour;
+  const randomFactor = Math.sin(timeSeed + x * 50 + y * 25 + z * 75) * 3; // Much smaller variation
+  directionAngle += randomFactor;
+  
+  // Convert angle to radians and create direction vector
+  const angleRad = (directionAngle * Math.PI) / 180;
+  const direction = new THREE.Vector3(
+    Math.cos(angleRad), // X component (east-west)
+    0, // Keep horizontal 
+    Math.sin(angleRad) // Z component (north-south)
+  ).normalize();
+  
+  return direction;
 }
 
 // Create ground plane with Leaflet map texture
@@ -721,6 +814,10 @@ function getWindSpeedForPattern(pattern, x, y, z) {
 function createWindCube(x, y, z, speed, flightLevel) {
   const geometry = new THREE.BoxGeometry(2, 2, 2); // Proper 2x2x2 cubes
   
+  // Generate wind direction for this cube
+  const windPattern = regions[settings.region].windPattern;
+  const windDirection = generateWindDirection(x, y, z, windPattern);
+  
   // Basic color mapping
   let color;
   if (speed < 20) {
@@ -747,11 +844,48 @@ function createWindCube(x, y, z, speed, flightLevel) {
   cube.userData = { 
     speed: speed, 
     flightLevel: flightLevel,
-    yLevel: y / 2 // Adjust for hover grouping
+    yLevel: y / 2, // Adjust for hover grouping
+    windDirection: windDirection // Store wind direction
+  };
+  
+  // Create wind direction arrow (hidden by default)
+  const arrow = new THREE.Mesh(arrowGeometry.clone(), arrowMaterial.clone());
+  
+  // Position arrow above the cube so it's clearly visible
+  arrow.position.set(x, y + 1.5, z);
+  
+  // Base rotation to point east (WORKING!)
+  arrow.rotation.x = Math.PI / 2; // Tip over 90° from up to forward (south)
+  arrow.rotation.y = 0; // No Y rotation  
+  arrow.rotation.z = -Math.PI / 2; // Z-axis turn from south to east
+  
+  // Add wind direction variation around Y-axis
+  const windAngle = Math.atan2(windDirection.z, windDirection.x);
+  arrow.rotation.y += windAngle * 0.3; // Small wind direction variation
+  
+  // Add banking/tilting for realistic wind flow patterns
+  const bankingFactor = Math.sin((x + z) * 0.3) * 0.08; // Subtle banking variation
+  const speedBanking = (speed - 50) / 300; // Faster winds bank more (reduced)
+  const altitudeBanking = y * 0.005; // Higher altitudes have more banking (reduced)
+  
+  // Apply banking as additional Z rotation
+  arrow.rotation.z += bankingFactor + speedBanking + altitudeBanking;
+  
+  // Scale arrow based on wind speed (shorter, more reasonable size)
+  const arrowScale = 0.4 + (speed / 100) * 0.3; // Scale from 0.4 to 0.7 (reasonable size)
+  arrow.scale.setScalar(arrowScale);
+  
+  // Hide arrow by default
+  arrow.visible = false;
+  arrow.userData = { 
+    cubeIndex: windCubes.length, // Reference to parent cube
+    yLevel: y / 2
   };
   
   scene.add(cube);
+  scene.add(arrow);
   windCubes.push(cube);
+  windArrows.push(arrow);
 }
 
 // Create flight level labels
@@ -941,7 +1075,12 @@ function onMouseMove(event) {
     const gridX = Math.round((hoveredCube.position.x + 9) / 2);
     const gridZ = Math.round((hoveredCube.position.z + 9) / 2);
     
-    tooltip.innerHTML = `FL${String(flightLevel).padStart(3, '0')}<br/>Wind: ${windSpeed} kt<br/>Grid: ${gridX}, ${gridZ}`;
+    // Calculate wind direction in degrees (from wind direction vector)
+    const windDir = hoveredCube.userData.windDirection;
+    const windAngle = Math.atan2(windDir.z, windDir.x) * 180 / Math.PI;
+    const windDirection = ((windAngle + 360) % 360).toFixed(0); // Convert to 0-360 degrees
+    
+    tooltip.innerHTML = `FL${String(flightLevel).padStart(3, '0')}<br/>Wind: ${windSpeed} kt @ ${windDirection}°<br/>Grid: ${gridX}, ${gridZ}`;
     
     // Apply hover effects
     windCubes.forEach(cube => {
@@ -958,6 +1097,16 @@ function onMouseMove(event) {
       }
       
       cube.material.opacity = targetOpacity;
+    });
+    
+    // Show arrows for hovered level
+    windArrows.forEach(arrow => {
+      if (arrow.userData.yLevel === hoveredYLevel) {
+        arrow.visible = true;
+      } else if (arrow.userData.yLevel !== selectedFlightLevel) {
+        // Hide arrows for non-selected, non-hovered levels
+        arrow.visible = false;
+      }
     });
   } else {
     isHovering = false;
@@ -980,6 +1129,16 @@ function onMouseMove(event) {
         }
         
         cube.material.opacity = targetOpacity;
+      });
+      
+      // Show arrows only for selected level when not hovering
+      windArrows.forEach(arrow => {
+        arrow.visible = arrow.userData.yLevel === selectedFlightLevel;
+      });
+    } else {
+      // Hide all arrows when no selection and not hovering
+      windArrows.forEach(arrow => {
+        arrow.visible = false;
       });
     }
     // If no selection, opacity will be handled by distance calculation in animate()
@@ -1079,7 +1238,12 @@ function onTouchMove(event) {
       const gridX = Math.round((hoveredCube.position.x + 9) / 2);
       const gridZ = Math.round((hoveredCube.position.z + 9) / 2);
       
-      tooltip.innerHTML = `FL${String(flightLevel).padStart(3, '0')}<br/>Wind: ${windSpeed} kt<br/>Grid: ${gridX}, ${gridZ}`;
+      // Calculate wind direction in degrees (from wind direction vector)
+      const windDir = hoveredCube.userData.windDirection;
+      const windAngle = Math.atan2(windDir.z, windDir.x) * 180 / Math.PI;
+      const windDirection = ((windAngle + 360) % 360).toFixed(0); // Convert to 0-360 degrees
+      
+      tooltip.innerHTML = `FL${String(flightLevel).padStart(3, '0')}<br/>Wind: ${windSpeed} kt @ ${windDirection}°<br/>Grid: ${gridX}, ${gridZ}`;
       
       // Apply hover effects
       windCubes.forEach(cube => {
@@ -1096,6 +1260,16 @@ function onTouchMove(event) {
         }
         
         cube.material.opacity = targetOpacity;
+      });
+      
+      // Show arrows for hovered level
+      windArrows.forEach(arrow => {
+        if (arrow.userData.yLevel === hoveredYLevel) {
+          arrow.visible = true;
+        } else if (arrow.userData.yLevel !== selectedFlightLevel) {
+          // Hide arrows for non-selected, non-hovered levels
+          arrow.visible = false;
+        }
       });
     } else {
       isHovering = false;
@@ -1115,6 +1289,16 @@ function onTouchMove(event) {
           }
           
           cube.material.opacity = targetOpacity;
+        });
+        
+        // Show arrows only for selected level when not hovering
+        windArrows.forEach(arrow => {
+          arrow.visible = arrow.userData.yLevel === selectedFlightLevel;
+        });
+      } else {
+        // Hide all arrows when no selection and not hovering
+        windArrows.forEach(arrow => {
+          arrow.visible = false;
         });
       }
     }
@@ -1171,6 +1355,16 @@ function onTouchEnd(event) {
         }
         
         cube.material.opacity = targetOpacity;
+      });
+      
+      // Show arrows only for selected level
+      windArrows.forEach(arrow => {
+        arrow.visible = arrow.userData.yLevel === selectedFlightLevel;
+      });
+    } else {
+      // Hide all arrows when no selection
+      windArrows.forEach(arrow => {
+        arrow.visible = false;
       });
     }
   }
@@ -1292,6 +1486,11 @@ function selectFlightLevel(yLevel) {
       cube.material.opacity = settings.cubeOpacity;
     }
   });
+  
+  // Show arrows for selected level
+  windArrows.forEach(arrow => {
+    arrow.visible = arrow.userData.yLevel === yLevel;
+  });
   updateMiniMap(); // Update mini map when flight level is selected
 }
 
@@ -1308,6 +1507,11 @@ function deselectFlightLevel() {
   // Reset all cube opacities to default
   windCubes.forEach(cube => {
     cube.material.opacity = settings.cubeOpacity;
+  });
+  
+  // Hide all arrows
+  windArrows.forEach(arrow => {
+    arrow.visible = false;
   });
   updateMiniMap(); // Update mini map when flight level is deselected
 }
@@ -1338,6 +1542,22 @@ function animate() {
       cube.material.opacity = opacity;
     });
   }
+  
+  // Animate wind arrows for more dynamic flow
+  const time = Date.now() * 0.001; // Current time in seconds
+  windArrows.forEach((arrow, index) => {
+    if (arrow.visible) {
+      // Add subtle oscillation to make wind look alive
+      // Store the base Z rotation if not already stored
+      if (arrow.userData.baseRotationZ === undefined) {
+        arrow.userData.baseRotationZ = arrow.rotation.z;
+      }
+      
+      // Add gentle oscillation
+      const oscillation = Math.sin(time * 1.5 + index * 0.2) * 0.03; // Very subtle
+      arrow.rotation.z = arrow.userData.baseRotationZ + oscillation;
+    }
+  });
   
   // Render main scene
   renderer.render(scene, camera);
