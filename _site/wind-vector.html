@@ -164,6 +164,7 @@ const settings = {
   region: 'Northeast',
   cubeOpacity: 0.03,
   mapStyle: 'OpenStreetMap',
+  darkBackground: true, // true = black, false = white
   currentDate: 'Oct 15, 2024',
   currentTime: '14:00',
   prevDate: function() { changeDate(-1); },
@@ -243,6 +244,15 @@ function updateDateTimeDisplay() {
   }
 }
 
+// Update background color
+function updateBackgroundColor(isDark) {
+  if (isDark) {
+    scene.background = new THREE.Color(0x000000); // Black background
+  } else {
+    scene.background = new THREE.Color(0xffffff); // White background
+  }
+}
+
 function changeDate(days) {
   const newDate = new Date(currentDate);
   newDate.setDate(newDate.getDate() + days);
@@ -285,7 +295,8 @@ function changeTime(hours) {
 function initScene() {
   // Scene setup
   scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x111111); // Light background
+  // Set initial background based on settings
+  updateBackgroundColor(settings.darkBackground); 
 
   // Get canvas and set up responsive sizing
   const canvas = document.getElementById('three-canvas');
@@ -373,6 +384,11 @@ function createGUI() {
   // Map style selector
   gui.add(settings, 'mapStyle', ['OpenStreetMap', 'Satellite', 'Terrain']).name('Map Style').onChange(function(value) {
     updateMapStyle(value);
+  });
+  
+  // Background color toggle
+  gui.add(settings, 'darkBackground').name('Dark Background').onChange(function(value) {
+    updateBackgroundColor(value);
   });
   
   // Date and time controls folder
