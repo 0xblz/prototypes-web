@@ -114,9 +114,14 @@ canvas {
   <div id="mini-map-resize-handle"></div>
 </div>
 
+<!-- Hidden Leaflet map for texture generation -->
+<div id="leaflet-map" style="width: 512px; height: 512px; position: absolute; top: -1000px; left: -1000px; visibility: hidden;"></div>
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/dat-gui/0.7.9/dat.gui.min.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
 <script>
 // 3D Wind Vector Visualization
@@ -148,10 +153,17 @@ let resizeStartMouse = { x: 0, y: 0 };
 let currentDate = new Date();
 let currentTime = { hour: 14, minute: 0 }; // Default to 14:00 (2 PM)
 
+// Leaflet map variables
+let leafletMap;
+let mapCanvas;
+let mapContext;
+let mapTexture;
+
 // GUI settings
 const settings = {
   region: 'Northeast',
   cubeOpacity: 0.03,
+  mapStyle: 'OpenStreetMap',
   currentDate: 'Oct 15, 2024',
   currentTime: '14:00',
   prevDate: function() { changeDate(-1); },
@@ -160,33 +172,51 @@ const settings = {
   nextTime: function() { changeTime(1); },
   randomizeWind: function() {
     regenerateWindData();
+    // Update mini map if a flight level is selected
+    if (selectedFlightLevel !== null) {
+      setTimeout(() => {
+        updateMiniMap();
+      }, 50); // Small delay to ensure cubes are fully generated
+    }
   }
 };
 
-// Regional configurations
+// Regional configurations with geographic bounds
 const regions = {
   'Northeast': {
-    mapUrl: 'https://tile.openstreetmap.org/5/9/12.png', // Northeast US
+    bounds: [[39.0, -80.0], [45.0, -67.0]], // NY, NE, ME region
+    center: [42.0, -73.5],
+    zoom: 6,
     windPattern: 'nor_easter' // Nor'easter and Atlantic influence
   },
   'Southeast': {
-    mapUrl: 'https://tile.openstreetmap.org/5/8/13.png', // Southeast US  
+    bounds: [[25.0, -87.0], [35.0, -75.0]], // FL, GA, SC, NC region
+    center: [30.0, -81.0],
+    zoom: 6,
     windPattern: 'gulf_stream' // Gulf Stream and tropical influence
   },
   'Midwest': {
-    mapUrl: 'https://tile.openstreetmap.org/5/7/11.png', // Great Lakes region
+    bounds: [[40.0, -93.0], [49.0, -80.0]], // Great Lakes region
+    center: [44.5, -86.5],
+    zoom: 6,
     windPattern: 'continental' // Continental and lake effect patterns
   },
   'Southwest': {
-    mapUrl: 'https://tile.openstreetmap.org/5/5/12.png', // Desert Southwest
+    bounds: [[31.0, -118.0], [37.0, -103.0]], // Desert Southwest
+    center: [34.0, -110.5],
+    zoom: 6,
     windPattern: 'desert' // Desert thermal and mountain wave patterns
   },
   'Northwest': {
-    mapUrl: 'https://tile.openstreetmap.org/5/5/10.png', // Pacific Northwest
+    bounds: [[42.0, -125.0], [49.0, -110.0]], // Pacific Northwest
+    center: [45.5, -117.5],
+    zoom: 6,
     windPattern: 'pacific' // Pacific maritime influence
   },
   'Great Plains': {
-    mapUrl: 'https://tile.openstreetmap.org/5/7/12.png', // Central Plains
+    bounds: [[36.0, -105.0], [49.0, -90.0]], // Central Plains
+    center: [42.5, -97.5],
+    zoom: 6,
     windPattern: 'plains' // Prairie winds and storm systems
   }
 };
@@ -219,6 +249,11 @@ function changeDate(days) {
   currentDate = newDate;
   updateDateTimeDisplay();
   regenerateWindData(); // Update wind data when date changes
+  
+  // Update mini map if a flight level is selected
+  if (selectedFlightLevel !== null) {
+    updateMiniMap();
+  }
 }
 
 function changeTime(hours) {
@@ -228,15 +263,20 @@ function changeTime(hours) {
   if (currentTime.hour >= 24) {
     currentTime.hour = 0;
     changeDate(1);
-    return; // changeDate already calls updateDateTimeDisplay and regenerateWindData
+    return; // changeDate already calls updateDateTimeDisplay, regenerateWindData, and updateMiniMap
   } else if (currentTime.hour < 0) {
     currentTime.hour = 23;
     changeDate(-1);
-    return; // changeDate already calls updateDateTimeDisplay and regenerateWindData
+    return; // changeDate already calls updateDateTimeDisplay, regenerateWindData, and updateMiniMap
   }
   
   updateDateTimeDisplay();
   regenerateWindData(); // Update wind data when time changes
+  
+  // Update mini map if a flight level is selected
+  if (selectedFlightLevel !== null) {
+    updateMiniMap();
+  }
 }
 
 
@@ -330,6 +370,11 @@ function createGUI() {
     updateRegion(value);
   });
   
+  // Map style selector
+  gui.add(settings, 'mapStyle', ['OpenStreetMap', 'Satellite', 'Terrain']).name('Map Style').onChange(function(value) {
+    updateMapStyle(value);
+  });
+  
   // Date and time controls folder
   const timeFolder = gui.addFolder('Date & Time');
   
@@ -357,10 +402,184 @@ function createGUI() {
   gui.add(settings, 'randomizeWind').name('Randomize Wind');
 }
 
+// Initialize Leaflet map
+function initLeafletMap() {
+  // Initialize Leaflet map (canvas already created in createGroundPlane)
+  const mapDiv = document.getElementById('leaflet-map');
+  leafletMap = L.map(mapDiv, {
+    zoomControl: false,
+    attributionControl: false,
+    dragging: false,
+    touchZoom: false,
+    scrollWheelZoom: false,
+    doubleClickZoom: false,
+    boxZoom: false
+  });
+  
+  // Add OpenStreetMap tiles
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19
+  }).addTo(leafletMap);
+  
+  // Set initial region and load texture
+  updateLeafletRegion(settings.region);
+}
+
+// Update Leaflet map to show different region
+function updateLeafletRegion(regionName) {
+  const region = regions[regionName];
+  leafletMap.setView(region.center, region.zoom);
+  
+  // Immediately capture texture (no need to wait for hidden map)
+  captureMapToTexture();
+}
+
+// Update map style
+function updateMapStyle(styleName) {
+  // Remove existing tile layers
+  leafletMap.eachLayer(function(layer) {
+    if (layer instanceof L.TileLayer) {
+      leafletMap.removeLayer(layer);
+    }
+  });
+  
+  // Add new tile layer based on style
+  let tileLayer;
+  switch(styleName) {
+    case 'OpenStreetMap':
+      tileLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png');
+      break;
+    case 'Satellite':
+      tileLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}');
+      break;
+    case 'Terrain':
+      tileLayer = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png');
+      break;
+    default:
+      tileLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png');
+  }
+  
+  tileLayer.addTo(leafletMap);
+  
+  // Update texture after style change
+  captureMapToTexture();
+}
+
+// Capture Leaflet map to canvas and create Three.js texture
+function captureMapToTexture() {
+  const region = regions[settings.region];
+  const zoom = region.zoom;
+  const center = region.center;
+  
+  // Calculate tile coordinates for the current region
+  const lat = center[0];
+  const lng = center[1];
+  
+  // Convert lat/lng to tile coordinates
+  const x = Math.floor((lng + 180) / 360 * Math.pow(2, zoom));
+  const y = Math.floor((1 - Math.log(Math.tan(lat * Math.PI / 180) + 1 / Math.cos(lat * Math.PI / 180)) / Math.PI) / 2 * Math.pow(2, zoom));
+  
+  // Get current map style
+  let tileUrl;
+  switch(settings.mapStyle) {
+    case 'OpenStreetMap':
+      tileUrl = `https://tile.openstreetmap.org/${zoom}/${x}/${y}.png`;
+      break;
+    case 'Satellite':
+      tileUrl = `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${zoom}/${y}/${x}`;
+      break;
+    case 'Terrain':
+      tileUrl = `https://tile.opentopomap.org/${zoom}/${x}/${y}.png`;
+      break;
+    default:
+      tileUrl = `https://tile.openstreetmap.org/${zoom}/${x}/${y}.png`;
+  }
+  
+  // Load the tile image
+  const img = new Image();
+  img.crossOrigin = 'anonymous';
+  
+  img.onload = function() {
+    // Clear canvas
+    mapContext.clearRect(0, 0, 512, 512);
+    
+    // Draw the tile image
+    mapContext.drawImage(img, 0, 0, 512, 512);
+    
+    // Add region name overlay
+    mapContext.fillStyle = 'rgba(0, 0, 0, 0.7)';
+    mapContext.fillRect(10, 10, 150, 30);
+    mapContext.fillStyle = 'white';
+    mapContext.font = '16px Arial';
+    mapContext.fillText(settings.region, 20, 30);
+    
+    // Create or update Three.js texture
+    if (mapTexture) {
+      mapTexture.needsUpdate = true;
+    } else {
+      mapTexture = new THREE.CanvasTexture(mapCanvas);
+    }
+    
+    // Update ground plane material
+    if (groundPlane) {
+      groundPlane.material.map = mapTexture;
+      groundPlane.material.needsUpdate = true;
+    }
+    
+    // Update mini map ground plane too
+    updateMiniMapGroundPlane();
+  };
+  
+  img.onerror = function() {
+    console.log('Failed to load tile, using fallback');
+    // Create a fallback pattern if tile fails to load
+    mapContext.fillStyle = '#4a7c59';
+    mapContext.fillRect(0, 0, 512, 512);
+    
+    // Add a simple grid pattern
+    mapContext.strokeStyle = '#3a5a2a';
+    mapContext.lineWidth = 1;
+    for (let i = 0; i < 512; i += 64) {
+      mapContext.beginPath();
+      mapContext.moveTo(i, 0);
+      mapContext.lineTo(i, 512);
+      mapContext.stroke();
+      mapContext.beginPath();
+      mapContext.moveTo(0, i);
+      mapContext.lineTo(512, i);
+      mapContext.stroke();
+    }
+    
+    // Add region name
+    mapContext.fillStyle = 'rgba(0, 0, 0, 0.7)';
+    mapContext.fillRect(10, 10, 150, 30);
+    mapContext.fillStyle = 'white';
+    mapContext.font = '16px Arial';
+    mapContext.fillText(settings.region, 20, 30);
+    
+    // Create texture even with fallback
+    if (mapTexture) {
+      mapTexture.needsUpdate = true;
+    } else {
+      mapTexture = new THREE.CanvasTexture(mapCanvas);
+    }
+    
+    if (groundPlane) {
+      groundPlane.material.map = mapTexture;
+      groundPlane.material.needsUpdate = true;
+    }
+    
+    updateMiniMapGroundPlane();
+  };
+  
+  // Start loading the image
+  img.src = tileUrl;
+}
+
 // Update region and regenerate data
 function updateRegion(regionName) {
   settings.region = regionName;
-  updateGroundPlane(regions[regionName].mapUrl);
+  updateLeafletRegion(regionName);
   regenerateWindData();
   updateMiniMap(); // Update mini map when region changes
   updateMiniMapGroundPlane(); // Update mini map ground plane when region changes
@@ -378,32 +597,32 @@ function regenerateWindData() {
   generateWindCubes();
 }
 
-// Update ground plane with new map
-function updateGroundPlane(mapUrl) {
-  if (groundPlane) {
-    scene.remove(groundPlane);
-  }
-  
+// Create ground plane with Leaflet map texture
+function createGroundPlane() {
   const geometry = new THREE.PlaneGeometry(20, 20);
-  const textureLoader = new THREE.TextureLoader();
   
-  const texture = textureLoader.load(mapUrl, undefined, undefined, function(error) {
-    // Fallback to green color if texture fails to load
-    const material = new THREE.MeshLambertMaterial({ color: 0x4a7c59 });
-    groundPlane.material = material;
-  });
+  // Create initial texture canvas
+  mapCanvas = document.createElement('canvas');
+  mapCanvas.width = 512;
+  mapCanvas.height = 512;
+  mapContext = mapCanvas.getContext('2d');
   
-  const material = new THREE.MeshLambertMaterial({ map: texture });
+  // Fill with initial pattern
+  mapContext.fillStyle = '#4a7c59';
+  mapContext.fillRect(0, 0, 512, 512);
+  
+  // Create initial texture
+  mapTexture = new THREE.CanvasTexture(mapCanvas);
+  
+  // Create material with texture
+  const material = new THREE.MeshLambertMaterial({ map: mapTexture });
   groundPlane = new THREE.Mesh(geometry, material);
   groundPlane.rotation.x = -Math.PI / 2;
   groundPlane.position.y = -1;
   scene.add(groundPlane);
-}
-
-// Create ground plane with real map texture
-function createGroundPlane() {
-  const currentRegion = regions[settings.region];
-  updateGroundPlane(currentRegion.mapUrl);
+  
+  // Initialize Leaflet map and load real texture
+  initLeafletMap();
 }
 
 // Generate 10x10x10 wind cube grid with region-specific patterns (10 flight levels)
@@ -614,11 +833,7 @@ function initMiniMap() {
   
   // Create ground plane for mini map
   const miniMapGeometry = new THREE.PlaneGeometry(20, 20);
-  const miniMapTextureLoader = new THREE.TextureLoader();
-  
-  const currentRegion = regions[settings.region];
-  const texture = miniMapTextureLoader.load(currentRegion.mapUrl);
-  const miniMapMaterial = new THREE.MeshLambertMaterial({ map: texture });
+  const miniMapMaterial = new THREE.MeshLambertMaterial({ color: 0x4a7c59 });
   miniMapGroundPlane = new THREE.Mesh(miniMapGeometry, miniMapMaterial);
   miniMapGroundPlane.rotation.x = -Math.PI / 2;
   miniMapGroundPlane.position.y = -1;
@@ -646,7 +861,7 @@ function updateMiniMap() {
         miniCube.position.copy(cube.position);
         miniCube.position.y = 0; // Flatten to ground level for top view
         miniCube.material = cube.material.clone();
-        miniCube.material.opacity = 0.4; // Reduced opacity to see map better
+        miniCube.material.opacity = 0.3; // Further reduced opacity to see map better
         miniMapScene.add(miniCube);
         miniMapCubes.push(miniCube);
       }
@@ -661,13 +876,18 @@ function updateMiniMap() {
 function updateMiniMapGroundPlane() {
   if (!miniMapGroundPlane) return;
   
-  const currentRegion = regions[settings.region];
-  const textureLoader = new THREE.TextureLoader();
-  
-  const texture = textureLoader.load(currentRegion.mapUrl, function(loadedTexture) {
-    miniMapGroundPlane.material.map = loadedTexture;
+  // Use the same texture as the main ground plane with subtle brightness enhancement
+  if (mapTexture) {
+    // Clone the material to avoid affecting the main ground plane
+    miniMapGroundPlane.material = new THREE.MeshLambertMaterial({ 
+      map: mapTexture,
+      color: 0xcccccc // Slightly brighter than normal (light gray tint)
+    });
+    
+    // Add very subtle emissive for better visibility
+    miniMapGroundPlane.material.emissive = new THREE.Color(0x111111);
     miniMapGroundPlane.material.needsUpdate = true;
-  });
+  }
 }
 
 // Handle mouse movement for interactions
