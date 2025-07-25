@@ -66,7 +66,6 @@ canvas {
 // 3D Wind Vector Visualization
 let scene, camera, renderer, controls;
 let windCubes = [];
-let flightLevelGroups = [];
 let groundPlane;
 let raycaster, mouse;
 let isHovering = false; // Track hover state
@@ -233,10 +232,8 @@ function updateGroundPlane(mapUrl) {
   const geometry = new THREE.PlaneGeometry(20, 20);
   const textureLoader = new THREE.TextureLoader();
   
-  const texture = textureLoader.load(mapUrl, function(loadedTexture) {
-    console.log('Map texture loaded for', settings.region);
-  }, undefined, function(error) {
-    console.error('Failed to load map texture, using fallback', error);
+  const texture = textureLoader.load(mapUrl, undefined, undefined, function(error) {
+    // Fallback to green color if texture fails to load
     const material = new THREE.MeshLambertMaterial({ color: 0x4a7c59 });
     groundPlane.material = material;
   });
@@ -271,7 +268,6 @@ function generateWindCubes() {
       }
     }
   }
-  groupCubesByFlightLevel();
 }
 
 // Get wind speed based on region-specific patterns
@@ -348,21 +344,6 @@ function createWindCube(x, y, z, speed, flightLevel) {
   
   scene.add(cube);
   windCubes.push(cube);
-}
-
-// Group cubes by flight level
-function groupCubesByFlightLevel() {
-  const flightLevels = {};
-  
-  windCubes.forEach(cube => {
-    const fl = cube.userData.yLevel; // Group by y level for interaction
-    if (!flightLevels[fl]) {
-      flightLevels[fl] = [];
-    }
-    flightLevels[fl].push(cube);
-  });
-  
-  flightLevelGroups = Object.values(flightLevels);
 }
 
 // Create flight level labels
@@ -471,11 +452,9 @@ function initMiniMap() {
 function updateMiniMap() {
   if (!miniMapRenderer) return;
   
-  const miniMapCanvasElement = document.getElementById('mini-map-canvas');
-  
   if (selectedFlightLevel !== null) {
     // Show mini map
-    miniMapCanvasElement.classList.add('visible');
+    miniMapCanvas.classList.add('visible');
     
     // Clear existing mini map cubes
     miniMapCubes.forEach(cube => {
@@ -497,7 +476,7 @@ function updateMiniMap() {
     });
   } else {
     // Hide mini map
-    miniMapCanvasElement.classList.remove('visible');
+    miniMapCanvas.classList.remove('visible');
   }
 }
 
