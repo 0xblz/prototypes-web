@@ -59,6 +59,20 @@ canvas {
   overflow: hidden;
 }
 
+.mini-map-arrow {
+  position: absolute;
+  width: 0;
+  height: 0;
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-bottom: 16px solid #00ddff;
+  transform-origin: center bottom;
+  pointer-events: none;
+  z-index: 15;
+  filter: drop-shadow(0 0 4px rgba(0, 255, 255, 0.6));
+  transition: transform 0.1s ease;
+}
+
 #mini-map-container.visible {
   opacity: 1;
 }
@@ -146,6 +160,7 @@ let miniMapCanvas;
 let miniMapContainer;
 let miniMapGroundPlane;
 let miniMapCubes = [];
+let miniMapArrows = []; // HTML arrow elements for mini map
 
 // Mini map resize variables
 let isResizing = false;
@@ -655,45 +670,50 @@ function createArrowGeometry() {
 
 // Generate realistic wind direction based on position and regional patterns
 function generateWindDirection(x, y, z, windPattern) {
-  // Start with pure eastward direction for testing
+  // Flight level determines base wind characteristics
+  const flightLevel = 50 + ((y / 2) * 50); // FL050 to FL500
+  
+  // Start with eastward direction, but vary significantly by altitude
   let directionAngle = 0; // Degrees from east (0° = due east)
   
-  // Add small regional wind pattern influences
+  // Altitude-based wind pattern changes (major variations between flight levels)
+  const altitudeLayerEffect = getAltitudeWindPattern(flightLevel, x, z);
+  directionAngle += altitudeLayerEffect;
+  
+  // Add regional wind pattern influences (smaller variations)
   switch(windPattern) {
     case 'nor_easter':
-      // Northeast: Mostly easterly with slight variations
-      directionAngle = 0 + (z * 1); // Small variation
+      // Northeast: More varied at different altitudes
+      directionAngle += (z * 2) + Math.sin(y * 0.8) * 15;
       break;
     case 'gulf_stream':
-      // Southeast: Mostly easterly
-      directionAngle = 0 + (x * 0.5);
+      // Southeast: Gulf Stream influence varies with altitude
+      directionAngle += (x * 1.2) + Math.cos(y * 0.6) * 12;
       break;
     case 'continental':
-      // Midwest: Mostly easterly
-      directionAngle = 0 + (x + z) * 0.3;
+      // Midwest: Continental flow patterns shift with altitude
+      directionAngle += (x + z) * 0.8 + Math.sin(y * 0.5) * 18;
       break;
     case 'desert':
-      // Southwest: Mostly easterly
-      directionAngle = 0 + Math.sin(x * 0.3) * 5;
+      // Southwest: Thermal patterns stronger at lower altitudes
+      const thermalEffect = Math.max(0, 1 - (y / 10)); // Stronger at lower altitudes
+      directionAngle += Math.sin(x * 0.4) * 10 * thermalEffect + Math.cos(y * 0.7) * 20;
       break;
     case 'pacific':
-      // Northwest: Mostly easterly for now
-      directionAngle = 0 + (z * 0.5);
+      // Northwest: Jet stream effects at higher altitudes
+      const jetStreamEffect = Math.min(1, y / 8); // Stronger at higher altitudes
+      directionAngle += 25 * jetStreamEffect + (z * 1.5) + Math.sin(y * 0.4) * 25;
       break;
     case 'plains':
-      // Great Plains: Mostly easterly
-      directionAngle = 0 + (x - z) * 0.3;
+      // Great Plains: Storm system influences vary with height
+      directionAngle += (x - z) * 1.2 + Math.cos(y * 0.6) * 16;
       break;
   }
   
-  // Add small altitude effects
-  const altitudeEffect = (y * 0.5); // Small effect
-  directionAngle += altitudeEffect;
-  
-  // Add small randomness for realism
+  // Add time-based variations that interact with altitude
   const timeSeed = currentDate.getTime() + currentTime.hour;
-  const randomFactor = Math.sin(timeSeed + x * 50 + y * 25 + z * 75) * 3; // Much smaller variation
-  directionAngle += randomFactor;
+  const timeAltitudeInteraction = Math.sin(timeSeed + x * 30 + y * 40 + z * 35) * (5 + y * 2);
+  directionAngle += timeAltitudeInteraction;
   
   // Convert angle to radians and create direction vector
   const angleRad = (directionAngle * Math.PI) / 180;
@@ -704,6 +724,30 @@ function generateWindDirection(x, y, z, windPattern) {
   ).normalize();
   
   return direction;
+}
+
+// Generate altitude-specific wind layer patterns
+function getAltitudeWindPattern(flightLevel, x, z) {
+  let layerEffect = 0;
+  
+  if (flightLevel <= 100) {
+    // Low altitude (FL050-FL100): Surface effects, more variable
+    layerEffect = Math.sin((x + z) * 0.6) * 25 + Math.cos(x * 0.8) * 15;
+  } else if (flightLevel <= 200) {
+    // Mid-low altitude (FL150-FL200): Transition layer
+    layerEffect = Math.sin((x - z) * 0.4) * 20 + Math.cos(z * 0.7) * 18;
+  } else if (flightLevel <= 300) {
+    // Mid altitude (FL250-FL300): More organized flow
+    layerEffect = Math.cos((x + z) * 0.3) * 15 + Math.sin(x * 0.5) * 12;
+  } else if (flightLevel <= 400) {
+    // High altitude (FL350-FL400): Jet stream influence
+    layerEffect = 30 + Math.sin(z * 0.2) * 10 + Math.cos(x * 0.3) * 8; // More westerly
+  } else {
+    // Very high altitude (FL450-FL500): Strong jet stream
+    layerEffect = 45 + Math.cos((x - z) * 0.2) * 12 + Math.sin(x * 0.25) * 6; // Very westerly
+  }
+  
+  return layerEffect;
 }
 
 // Create ground plane with Leaflet map texture
@@ -1004,6 +1048,12 @@ function updateMiniMap() {
     });
     miniMapCubes = [];
     
+    // Clear existing HTML arrows
+    miniMapArrows.forEach(arrow => {
+      miniMapContainer.removeChild(arrow);
+    });
+    miniMapArrows = [];
+    
     // Add selected flight level cubes to mini map
     windCubes.forEach(cube => {
       if (cube.userData.yLevel === selectedFlightLevel) {
@@ -1014,12 +1064,102 @@ function updateMiniMap() {
         miniCube.material.opacity = 0.3; // Further reduced opacity to see map better
         miniMapScene.add(miniCube);
         miniMapCubes.push(miniCube);
+        
+        // Create HTML arrow for this cube
+        createMiniMapArrow(cube);
       }
     });
   } else {
     // Hide mini map
     miniMapContainer.classList.remove('visible');
+    
+    // Clear HTML arrows when hiding
+    miniMapArrows.forEach(arrow => {
+      miniMapContainer.removeChild(arrow);
+    });
+    miniMapArrows = [];
   }
+}
+
+// Create HTML arrow for mini map
+function createMiniMapArrow(cube) {
+  const arrow = document.createElement('div');
+  arrow.className = 'mini-map-arrow';
+  
+  // Get wind direction data from the cube
+  const windDirection = cube.userData.windDirection;
+  
+  // Calculate position in mini map coordinates
+  // Convert world position (-10 to 10) to mini map percentage (0% to 100%)
+  const containerRect = miniMapContainer.getBoundingClientRect();
+  const mapSize = containerRect.width - 8; // Account for border
+  
+  // Map world coordinates to mini map coordinates
+  const worldX = cube.position.x; // -9 to 9
+  const worldZ = cube.position.z; // -9 to 9
+  
+  // Convert to 0-1 range, then to pixels
+  const normalizedX = (worldX + 10) / 20; // Convert -10 to 10 to 0 to 1
+  const normalizedZ = (worldZ + 10) / 20; // Convert -10 to 10 to 0 to 1
+  
+  const pixelX = normalizedX * mapSize;
+  const pixelZ = normalizedZ * mapSize;
+  
+  // Position arrow (remember Y is flipped in CSS, and it's a top-down view)
+  arrow.style.left = `${pixelX}px`;
+  arrow.style.top = `${pixelZ}px`;
+  
+  // Calculate rotation angle from wind direction (top-down view)
+  // In top-down view: X = right, Z = down
+  const windAngle = Math.atan2(windDirection.z, windDirection.x) * 180 / Math.PI;
+  
+  // Add banking effect based on wind speed and position
+  const speed = cube.userData.speed;
+  const bankingEffect = Math.sin((cube.position.x + cube.position.z) * 0.3) * 5; // ±5 degrees
+  const speedBanking = (speed - 50) / 10; // Faster winds get more banking
+  
+  const totalRotation = windAngle + bankingEffect + speedBanking;
+  
+  // Apply rotation and banking
+  arrow.style.transform = `translate(-50%, -100%) rotate(${totalRotation}deg)`;
+  
+  // Scale based on wind speed
+  const scale = 0.6 + (speed / 100) * 0.4; // Scale from 0.6 to 1.0
+  arrow.style.transform += ` scale(${scale})`;
+  
+  // Add to container and track
+  miniMapContainer.appendChild(arrow);
+  miniMapArrows.push(arrow);
+  
+  // Store cube reference for position updates
+  arrow.dataset.cubeIndex = windCubes.indexOf(cube);
+}
+
+// Update mini map arrow positions after resize
+function updateMiniMapArrowPositions() {
+  const containerRect = miniMapContainer.getBoundingClientRect();
+  const mapSize = containerRect.width - 8; // Account for border
+  
+  miniMapArrows.forEach(arrow => {
+    const cubeIndex = parseInt(arrow.dataset.cubeIndex);
+    const cube = windCubes[cubeIndex];
+    
+    if (cube && cube.userData.yLevel === selectedFlightLevel) {
+      // Recalculate position
+      const worldX = cube.position.x;
+      const worldZ = cube.position.z;
+      
+      const normalizedX = (worldX + 10) / 20;
+      const normalizedZ = (worldZ + 10) / 20;
+      
+      const pixelX = normalizedX * mapSize;
+      const pixelZ = normalizedZ * mapSize;
+      
+      // Update position
+      arrow.style.left = `${pixelX}px`;
+      arrow.style.top = `${pixelZ}px`;
+    }
+  });
 }
 
 // Update mini map ground plane when region changes
@@ -1433,6 +1573,11 @@ function onMiniMapResize(event) {
   
   // Update renderer size
   miniMapRenderer.setSize(newSize - 8, newSize - 8); // Account for border
+  
+  // Update mini map arrow positions after resize
+  if (selectedFlightLevel !== null) {
+    updateMiniMapArrowPositions();
+  }
 }
 
 function onMiniMapResizeEnd(event) {
@@ -1556,6 +1701,32 @@ function animate() {
       // Add gentle oscillation
       const oscillation = Math.sin(time * 1.5 + index * 0.2) * 0.03; // Very subtle
       arrow.rotation.z = arrow.userData.baseRotationZ + oscillation;
+    }
+  });
+  
+  // Animate mini map HTML arrows too
+  miniMapArrows.forEach((arrow, index) => {
+    if (!arrow.dataset.baseRotation) {
+      // Extract base rotation from current transform
+      const currentTransform = arrow.style.transform;
+      const rotateMatch = currentTransform.match(/rotate\(([^)]+)deg\)/);
+      if (rotateMatch) {
+        arrow.dataset.baseRotation = rotateMatch[1];
+      }
+    }
+    
+    if (arrow.dataset.baseRotation) {
+      const baseRotation = parseFloat(arrow.dataset.baseRotation);
+      const oscillation = Math.sin(time * 1.5 + index * 0.2) * 2; // ±2 degrees
+      const newRotation = baseRotation + oscillation;
+      
+      // Update transform while preserving other parts
+      const currentTransform = arrow.style.transform;
+      const newTransform = currentTransform.replace(
+        /rotate\([^)]+deg\)/,
+        `rotate(${newRotation}deg)`
+      );
+      arrow.style.transform = newTransform;
     }
   });
   
