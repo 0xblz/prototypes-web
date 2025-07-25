@@ -97,7 +97,7 @@ canvas {
   #mini-map-resize-handle {
     width: 16px;
     height: 16px;
-  }
+    }
 }
 
 #tooltip {
@@ -144,10 +144,20 @@ let isResizing = false;
 let resizeStartSize = { width: 0, height: 0 };
 let resizeStartMouse = { x: 0, y: 0 };
 
+// Date and time control variables
+let currentDate = new Date();
+let currentTime = { hour: 14, minute: 0 }; // Default to 14:00 (2 PM)
+
 // GUI settings
 const settings = {
   region: 'Northeast',
   cubeOpacity: 0.03,
+  currentDate: 'Oct 15, 2024',
+  currentTime: '14:00',
+  prevDate: function() { changeDate(-1); },
+  nextDate: function() { changeDate(1); },
+  prevTime: function() { changeTime(-1); },
+  nextTime: function() { changeTime(1); },
   randomizeWind: function() {
     regenerateWindData();
   }
@@ -181,11 +191,61 @@ const regions = {
   }
 };
 
+// Date and time control functions
+function formatDate(date) {
+  const options = { month: 'short', day: 'numeric', year: 'numeric' };
+  return date.toLocaleDateString('en-US', options);
+}
+
+function formatTime(timeObj) {
+  const hour = timeObj.hour.toString().padStart(2, '0');
+  const minute = timeObj.minute.toString().padStart(2, '0');
+  return `${hour}:${minute}`;
+}
+
+function updateDateTimeDisplay() {
+  settings.currentDate = formatDate(currentDate);
+  settings.currentTime = formatTime(currentTime);
+  
+  // Update GUI display if available
+  if (gui) {
+    gui.updateDisplay();
+  }
+}
+
+function changeDate(days) {
+  const newDate = new Date(currentDate);
+  newDate.setDate(newDate.getDate() + days);
+  currentDate = newDate;
+  updateDateTimeDisplay();
+  regenerateWindData(); // Update wind data when date changes
+}
+
+function changeTime(hours) {
+  currentTime.hour += hours;
+  
+  // Handle day rollover
+  if (currentTime.hour >= 24) {
+    currentTime.hour = 0;
+    changeDate(1);
+    return; // changeDate already calls updateDateTimeDisplay and regenerateWindData
+  } else if (currentTime.hour < 0) {
+    currentTime.hour = 23;
+    changeDate(-1);
+    return; // changeDate already calls updateDateTimeDisplay and regenerateWindData
+  }
+  
+  updateDateTimeDisplay();
+  regenerateWindData(); // Update wind data when time changes
+}
+
+
+
 // Initialize the scene
 function initScene() {
   // Scene setup
   scene = new THREE.Scene();
-  scene.background = new THREE.Color(0xDBDDEB); // Light background
+  scene.background = new THREE.Color(0x111111); // Light background
 
   // Get canvas and set up responsive sizing
   const canvas = document.getElementById('three-canvas');
@@ -225,6 +285,9 @@ function initScene() {
   
   // Create GUI
   createGUI();
+  
+  // Initialize date and time display
+  updateDateTimeDisplay();
   
   // Create tooltip
   createTooltip();
@@ -266,6 +329,24 @@ function createGUI() {
   gui.add(settings, 'region', Object.keys(regions)).name('US Region').onChange(function(value) {
     updateRegion(value);
   });
+  
+  // Date and time controls folder
+  const timeFolder = gui.addFolder('Date & Time');
+  
+  // Add read-only date and time displays
+  const dateController = timeFolder.add(settings, 'currentDate').name('Date').listen();
+  const timeController = timeFolder.add(settings, 'currentTime').name('Time').listen();
+  
+  // Make the input fields read-only
+  dateController.domElement.querySelector('input').readOnly = true;
+  timeController.domElement.querySelector('input').readOnly = true;
+  
+  // Add navigation buttons
+  timeFolder.add(settings, 'prevDate').name('← Previous Day');
+  timeFolder.add(settings, 'nextDate').name('Next Day →');
+  timeFolder.add(settings, 'prevTime').name('← Previous Hour');
+  timeFolder.add(settings, 'nextTime').name('Next Hour →');
+  timeFolder.open(); // Start with time folder open
   
   // Opacity control
   gui.add(settings, 'cubeOpacity', 0.01, 0.3).name('Cube Opacity').onChange(function(value) {
@@ -349,34 +430,52 @@ function getWindSpeedForPattern(pattern, x, y, z) {
   const baseSpeed = 10 + (y * 2.5); // Speed increases with altitude
   let speed = baseSpeed;
   
+  // Add time-based variation (hour of day affects wind patterns)
+  const hourFactor = Math.sin((currentTime.hour / 24) * 2 * Math.PI) * 5;
+  
+  // Add date-based variation (day of year affects seasonal patterns)
+  const dayOfYear = Math.floor((currentDate - new Date(currentDate.getFullYear(), 0, 0)) / 1000 / 60 / 60 / 24);
+  const seasonalFactor = Math.cos((dayOfYear / 365) * 2 * Math.PI) * 8;
+  
+  // Create a pseudo-random seed based on date and time for consistent patterns
+  const timeSeed = currentDate.getTime() + currentTime.hour;
+  const seededRandom = (Math.sin(timeSeed + x * 1000 + y * 100 + z * 10) + 1) / 2;
+  
   switch(pattern) {
     case 'nor_easter':
       // Northeast: Strong easterly flows, coastal influence
-      speed += (x + 10) * 1.8 + Math.sin(z * 0.4) * 8 + Math.random() * 18 - 9;
+      speed += (x + 10) * 1.8 + Math.sin(z * 0.4) * 8 + (seededRandom * 18 - 9);
+      speed += hourFactor + seasonalFactor;
       break;
     case 'gulf_stream':
       // Southeast: Tropical patterns, gulf moisture influence
       const coastalEffect = Math.sin((z + 10) * 0.3) * 12;
-      speed += coastalEffect + Math.random() * 16 - 8;
+      speed += coastalEffect + (seededRandom * 16 - 8);
+      speed += hourFactor * 0.8 + seasonalFactor * 1.2;
       break;
     case 'continental':
       // Midwest: Variable continental patterns, lake effects
       const lakeEffect = Math.cos(x * 0.6) * Math.sin(z * 0.5) * 15;
-      speed += lakeEffect + Math.random() * 22 - 11;
+      speed += lakeEffect + (seededRandom * 22 - 11);
+      speed += hourFactor * 1.5 + seasonalFactor;
       break;
     case 'desert':
-      // Southwest: Thermal updrafts, mountain wave patterns
+      // Southwest: Thermal updrafts, mountain wave patterns (stronger during day)
       const thermalEffect = Math.abs(x) + Math.abs(z);
-      speed += thermalEffect * 0.8 + Math.sin(y * 0.4) * 10 + Math.random() * 14 - 7;
+      const thermalBoost = currentTime.hour >= 10 && currentTime.hour <= 16 ? 8 : 0;
+      speed += thermalEffect * 0.8 + Math.sin(y * 0.4) * 10 + (seededRandom * 14 - 7);
+      speed += thermalBoost + seasonalFactor * 0.5;
       break;
     case 'pacific':
       // Northwest: Strong westerly flow, marine layer influence
-      speed += (10 - x) * 2.0 + Math.cos(y * 0.3) * 6 + Math.random() * 16 - 8;
+      speed += (10 - x) * 2.0 + Math.cos(y * 0.3) * 6 + (seededRandom * 16 - 8);
+      speed += hourFactor * 0.6 + seasonalFactor * 1.3;
       break;
     case 'plains':
       // Great Plains: Prairie winds, storm system influence
       const stormEffect = Math.sin((x + z) * 0.4) * 12;
-      speed += stormEffect + (Math.random() * 25 - 12.5);
+      speed += stormEffect + (seededRandom * 25 - 12.5);
+      speed += hourFactor * 1.2 + seasonalFactor;
       break;
   }
   
@@ -495,7 +594,7 @@ function initMiniMap() {
   
   // Set up mini map scene
   miniMapScene = new THREE.Scene();
-  miniMapScene.background = new THREE.Color(0x001133);
+  miniMapScene.background = new THREE.Color(0x000000);
   
   // Set up orthographic camera for top-down view
   miniMapCamera = new THREE.OrthographicCamera(-10, 10, 10, -10, 0.1, 100);
