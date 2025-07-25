@@ -163,6 +163,7 @@ const settings = {
   cubeOpacity: 0.03,
   mapStyle: 'OpenStreetMap',
   darkBackground: true, // true = black, false = white
+  showWindArrows: true, // Show wind direction arrows by default
   currentDate: 'Oct 15, 2024',
   currentTime: '14:00',
   prevDate: function() { changeDate(-1); },
@@ -248,6 +249,41 @@ function updateBackgroundColor(isDark) {
     scene.background = new THREE.Color(0x000000); // Black background
   } else {
     scene.background = new THREE.Color(0xffffff); // White background
+  }
+}
+
+// Toggle wind arrows visibility
+function toggleWindArrows(showArrows) {
+  if (showArrows) {
+    // Show arrows based on current selection/hover state
+    if (selectedFlightLevel !== null) {
+      // Show arrows for selected flight level
+      windArrows.forEach(arrow => {
+        arrow.visible = arrow.userData.yLevel === selectedFlightLevel;
+      });
+    } else {
+      // Hide all arrows if no selection
+      windArrows.forEach(arrow => {
+        arrow.visible = false;
+      });
+    }
+    
+    // Show mini map arrows if mini map is visible
+    if (selectedFlightLevel !== null) {
+      miniMapArrows.forEach(arrow => {
+        arrow.style.display = 'block';
+      });
+    }
+  } else {
+    // Hide all 3D arrows
+    windArrows.forEach(arrow => {
+      arrow.visible = false;
+    });
+    
+    // Hide all mini map arrows
+    miniMapArrows.forEach(arrow => {
+      arrow.style.display = 'none';
+    });
   }
 }
 
@@ -390,6 +426,11 @@ function createGUI() {
   // Background color toggle
   gui.add(settings, 'darkBackground').name('Dark Background').onChange(function(value) {
     updateBackgroundColor(value);
+  });
+  
+  // Wind arrows toggle
+  gui.add(settings, 'showWindArrows').name('Show Wind Arrows').onChange(function(value) {
+    toggleWindArrows(value);
   });
   
   // Date and time controls folder
@@ -1107,6 +1148,9 @@ function createMiniMapArrow(cube) {
   const scale = 0.6 + (speed / 100) * 0.4; // Scale from 0.6 to 1.0
   arrow.style.transform += ` scale(${scale})`;
   
+  // Set initial visibility based on setting
+  arrow.style.display = settings.showWindArrows ? 'block' : 'none';
+  
   // Add to container and track
   miniMapContainer.appendChild(arrow);
   miniMapArrows.push(arrow);
@@ -1219,12 +1263,12 @@ function onMouseMove(event) {
       cube.material.opacity = targetOpacity;
     });
     
-    // Show arrows for hovered level
+    // Show arrows for hovered level (only if arrows are enabled)
     windArrows.forEach(arrow => {
-      if (arrow.userData.yLevel === hoveredYLevel) {
+      if (settings.showWindArrows && arrow.userData.yLevel === hoveredYLevel) {
         arrow.visible = true;
-      } else if (arrow.userData.yLevel !== selectedFlightLevel) {
-        // Hide arrows for non-selected, non-hovered levels
+      } else if (arrow.userData.yLevel !== selectedFlightLevel || !settings.showWindArrows) {
+        // Hide arrows for non-selected, non-hovered levels or if arrows disabled
         arrow.visible = false;
       }
     });
@@ -1251,9 +1295,9 @@ function onMouseMove(event) {
         cube.material.opacity = targetOpacity;
       });
       
-      // Show arrows only for selected level when not hovering
+      // Show arrows only for selected level when not hovering (if enabled)
       windArrows.forEach(arrow => {
-        arrow.visible = arrow.userData.yLevel === selectedFlightLevel;
+        arrow.visible = settings.showWindArrows && arrow.userData.yLevel === selectedFlightLevel;
       });
     } else {
       // Hide all arrows when no selection and not hovering
@@ -1382,12 +1426,12 @@ function onTouchMove(event) {
         cube.material.opacity = targetOpacity;
       });
       
-      // Show arrows for hovered level
+      // Show arrows for hovered level (only if arrows are enabled)
       windArrows.forEach(arrow => {
-        if (arrow.userData.yLevel === hoveredYLevel) {
+        if (settings.showWindArrows && arrow.userData.yLevel === hoveredYLevel) {
           arrow.visible = true;
-        } else if (arrow.userData.yLevel !== selectedFlightLevel) {
-          // Hide arrows for non-selected, non-hovered levels
+        } else if (arrow.userData.yLevel !== selectedFlightLevel || !settings.showWindArrows) {
+          // Hide arrows for non-selected, non-hovered levels or if arrows disabled
           arrow.visible = false;
         }
       });
@@ -1477,9 +1521,9 @@ function onTouchEnd(event) {
         cube.material.opacity = targetOpacity;
       });
       
-      // Show arrows only for selected level
+      // Show arrows only for selected level (if enabled)
       windArrows.forEach(arrow => {
-        arrow.visible = arrow.userData.yLevel === selectedFlightLevel;
+        arrow.visible = settings.showWindArrows && arrow.userData.yLevel === selectedFlightLevel;
       });
     } else {
       // Hide all arrows when no selection
@@ -1612,9 +1656,9 @@ function selectFlightLevel(yLevel) {
     }
   });
   
-  // Show arrows for selected level
+  // Show arrows for selected level (only if arrows are enabled)
   windArrows.forEach(arrow => {
-    arrow.visible = arrow.userData.yLevel === yLevel;
+    arrow.visible = settings.showWindArrows && arrow.userData.yLevel === yLevel;
   });
   updateMiniMap(); // Update mini map when flight level is selected
 }
