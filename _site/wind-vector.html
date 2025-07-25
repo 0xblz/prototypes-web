@@ -67,11 +67,6 @@ canvas {
   }
 }
 
-/* UI Enhancement styles */
-body {
-  background: radial-gradient(ellipse at center, #1a1a2e 0%, #16213e 50%, #0f0f23 100%);
-}
-
 #tooltip {
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
@@ -86,16 +81,10 @@ body {
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/dat-gui/0.7.9/dat.gui.min.js"></script>
-<!-- Post-processing dependencies -->
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/CopyShader.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/EffectComposer.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/RenderPass.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/ShaderPass.min.js"></script>
 
 <script>
 // 3D Wind Vector Visualization
 let scene, camera, renderer, controls;
-let composer; // Post-processing composer
 let windCubes = [];
 let flightLevelGroups = [];
 let groundPlane;
@@ -107,8 +96,6 @@ let mouseDownPosition = { x: 0, y: 0 }; // Track mouse down position
 let isDragging = false; // Track if user is dragging
 let gui; // dat.GUI instance
 let tooltip; // Tooltip element
-let clock = new THREE.Clock(); // For animations
-let time = 0;
 
 // Mini map variables
 let miniMapScene, miniMapCamera, miniMapRenderer;
@@ -119,8 +106,7 @@ let miniMapCubes = [];
 // GUI settings
 const settings = {
   region: 'Northeast',
-  cubeOpacity: 0.08, // Default cube opacity
-  enableEffects: false, // Toggle for all visual enhancements (default: OFF)
+  cubeOpacity: 0.03,
   randomizeWind: function() {
     regenerateWindData();
   }
@@ -158,12 +144,7 @@ const regions = {
 function initScene() {
   // Scene setup
   scene = new THREE.Scene();
-  // Set background based on effects setting
-  if (settings.enableEffects) {
-    scene.background = new THREE.Color(0x0a0a1a); // Dark blue/purple background for UI feel
-  } else {
-    scene.background = new THREE.Color(0xDBDDEB); // Original light background
-  }
+  scene.background = new THREE.Color(0xDBDDEB); // Light background
 
   // Get canvas and set up responsive sizing
   const canvas = document.getElementById('three-canvas');
@@ -178,20 +159,9 @@ function initScene() {
   renderer.setSize(rect.width, rect.height);
   renderer.setPixelRatio(window.devicePixelRatio);
 
-  // Setup lighting based on effects setting
-  if (settings.enableEffects) {
-    // Enhanced lighting for UI feel
-    const ambientLight = new THREE.AmbientLight(0x404080, 0.6); // Slightly blue ambient
-    scene.add(ambientLight);
-    
-    const directionalLight = new THREE.DirectionalLight(0x80a0ff, 0.8); // Cool directional light
-    directionalLight.position.set(10, 10, 10);
-    scene.add(directionalLight);
-  } else {
-    // Original basic lighting
-    const ambientLight = new THREE.AmbientLight(0xffffff, 1.0); // Bright white ambient light
-    scene.add(ambientLight);
-  }
+  // Basic lighting
+  const ambientLight = new THREE.AmbientLight(0xffffff, 1.0); // Bright white ambient light
+  scene.add(ambientLight);
   
   // Controls
   controls = new THREE.OrbitControls(camera, renderer.domElement);
@@ -210,9 +180,6 @@ function initScene() {
   
   // Create flight level labels
   createFlightLevelLabels();
-  
-  // Setup post-processing
-  setupPostProcessing();
   
   // Create GUI
   createGUI();
@@ -237,170 +204,22 @@ function initScene() {
   window.addEventListener('resize', onWindowResize);
 }
 
-// Setup post-processing pipeline
-function setupPostProcessing() {
-  // Create composer
-  composer = new THREE.EffectComposer(renderer);
-  
-  // Add render pass
-  const renderPass = new THREE.RenderPass(scene, camera);
-  composer.addPass(renderPass);
-  
-  // Add custom UI effects shader pass
-  const uiEffectsPass = new THREE.ShaderPass({
-    uniforms: {
-      tDiffuse: { value: null },
-      time: { value: 0 },
-      glitchAmount: { value: 0.003 },
-      scanlineIntensity: { value: 0.02 },
-      vignetteStrength: { value: 0.3 },
-      chromaticAberration: { value: 0.002 }
-    },
-    vertexShader: `
-      varying vec2 vUv;
-      
-      void main() {
-        vUv = uv;
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-      }
-    `,
-    fragmentShader: `
-      uniform sampler2D tDiffuse;
-      uniform float time;
-      uniform float glitchAmount;
-      uniform float scanlineIntensity;
-      uniform float vignetteStrength;
-      uniform float chromaticAberration;
-      
-      varying vec2 vUv;
-      
-      float random(vec2 st) {
-        return fract(sin(dot(st.xy, vec2(12.9898, 78.233))) * 43758.5453123);
-      }
-      
-      void main() {
-        vec2 uv = vUv;
-        
-        // Chromatic aberration
-        float aberration = chromaticAberration * (1.0 + sin(time * 0.5) * 0.5);
-        vec2 dir = uv - vec2(0.5);
-        float dist = length(dir);
-        
-        vec3 color;
-        color.r = texture2D(tDiffuse, uv + dir * aberration * dist).r;
-        color.g = texture2D(tDiffuse, uv).g;
-        color.b = texture2D(tDiffuse, uv - dir * aberration * dist).b;
-        
-        // Subtle glitch effect
-        float glitchSeed = floor(time * 8.0);
-        float glitch = random(vec2(glitchSeed, floor(uv.y * 200.0)));
-        
-        if (glitch > 0.98) {
-          uv.x += glitchAmount * (random(vec2(glitchSeed, uv.y)) * 2.0 - 1.0);
-          color = texture2D(tDiffuse, uv).rgb;
-        }
-        
-        // Scanlines
-        float scanline = sin(uv.y * 800.0 + time * 2.0) * scanlineIntensity + (1.0 - scanlineIntensity);
-        color *= scanline;
-        
-        // Vignette
-        float vignette = smoothstep(1.0, 0.7, length(uv - 0.5) * 1.2);
-        color *= mix(1.0, vignette, vignetteStrength);
-        
-        // Subtle blue tint for UI feel
-        color = mix(color, color * vec3(0.9, 0.95, 1.1), 0.1);
-        
-        gl_FragColor = vec4(color, 1.0);
-      }
-    `
-  });
-  uiEffectsPass.renderToScreen = true;
-  composer.addPass(uiEffectsPass);
-  
-  // Store for animation
-  window.uiEffectsPass = uiEffectsPass;
-}
-
 // Create dat.GUI interface
 function createGUI() {
   gui = new dat.GUI();
-  
-  // Effects toggle
-  gui.add(settings, 'enableEffects').name('Enable Effects').onChange(function(value) {
-    toggleEffects(value);
-  });
   
   // Region selector
   gui.add(settings, 'region', Object.keys(regions)).name('US Region').onChange(function(value) {
     updateRegion(value);
   });
   
-  // Opacity control - adjust range based on effects mode
-  const opacityController = gui.add(settings, 'cubeOpacity', 0.01, 0.3).name('Cube Opacity').onChange(function(value) {
+  // Opacity control
+  gui.add(settings, 'cubeOpacity', 0.01, 0.3).name('Cube Opacity').onChange(function(value) {
     updateCubeOpacity();
   });
   
-  // Store reference for dynamic range updates
-  window.opacityController = opacityController;
-  
   // Wind randomization button
   gui.add(settings, 'randomizeWind').name('Randomize Wind');
-}
-
-// Toggle between enhanced and basic visual modes
-function toggleEffects(enabled) {
-  if (enabled) {
-    // Enable enhanced mode
-    scene.background = new THREE.Color(0x0a0a1a); // Dark blue/purple background
-    document.body.style.background = 'radial-gradient(ellipse at center, #1a1a2e 0%, #16213e 50%, #0f0f23 100%)';
-    
-    // Adjust opacity for effects mode
-    if (settings.cubeOpacity > 0.15) {
-      settings.cubeOpacity = 0.08;
-    }
-  } else {
-    // Enable basic mode
-    scene.background = new THREE.Color(0xDBDDEB); // Original light background
-    document.body.style.background = ''; // Reset to default
-    
-    // Adjust opacity for basic mode
-    if (settings.cubeOpacity < 0.15) {
-      settings.cubeOpacity = 0.03;
-    }
-  }
-  
-  // Update opacity controller display
-  if (window.opacityController) {
-    window.opacityController.updateDisplay();
-  }
-  
-  // Clear existing scene lighting
-  const lightsToRemove = [];
-  scene.traverse(function(child) {
-    if (child instanceof THREE.Light) {
-      lightsToRemove.push(child);
-    }
-  });
-  lightsToRemove.forEach(light => scene.remove(light));
-  
-  // Add appropriate lighting
-  if (enabled) {
-    // Enhanced lighting for UI feel
-    const ambientLight = new THREE.AmbientLight(0x404080, 0.6); // Slightly blue ambient
-    scene.add(ambientLight);
-    
-    const directionalLight = new THREE.DirectionalLight(0x80a0ff, 0.8); // Cool directional light
-    directionalLight.position.set(10, 10, 10);
-    scene.add(directionalLight);
-  } else {
-    // Original basic lighting
-    const ambientLight = new THREE.AmbientLight(0xffffff, 1.0); // Bright white ambient light
-    scene.add(ambientLight);
-  }
-  
-  // Regenerate cubes with appropriate materials
-  regenerateWindData();
 }
 
 // Update region and regenerate data
@@ -513,120 +332,37 @@ function getWindSpeedForPattern(pattern, x, y, z) {
   return Math.max(5, Math.min(100, speed));
 }
 
-// Create individual wind cube with enhanced or basic material
+// Create individual wind cube with basic material
 function createWindCube(x, y, z, speed, flightLevel) {
   const geometry = new THREE.BoxGeometry(2, 2, 2); // Proper 2x2x2 cubes
   
-  let material;
-  
-  if (settings.enableEffects) {
-    // Enhanced color mapping with neon colors for UI feel
-    let color, emissiveColor;
-    if (speed < 20) {
-      color = 0x00ff88; // Neon green - calm
-      emissiveColor = 0x004422;
-    } else if (speed < 35) {
-      color = 0x88ff00; // Bright green - light
-      emissiveColor = 0x224400;
-    } else if (speed < 50) {
-      color = 0xffff00; // Neon yellow - moderate
-      emissiveColor = 0x444400;
-    } else if (speed < 65) {
-      color = 0xff8800; // Neon orange - strong
-      emissiveColor = 0x442200;
-    } else {
-      color = 0xff0044; // Neon red - very strong
-      emissiveColor = 0x440011;
-    }
-    
-    // Create enhanced material (without glow effects)
-    material = new THREE.ShaderMaterial({
-      uniforms: {
-        time: { value: 0 },
-        color: { value: new THREE.Color(color) },
-        emissiveColor: { value: new THREE.Color(emissiveColor) },
-        opacity: { value: settings.cubeOpacity },
-        windSpeed: { value: speed / 100.0 } // Normalized wind speed for effects
-      },
-      vertexShader: `
-        uniform float time;
-        uniform float windSpeed;
-        
-        varying vec3 vPosition;
-        
-        void main() {
-          vPosition = position;
-          
-          // Subtle pulse based on wind speed
-          vec3 pos = position;
-          float pulse = sin(time * (2.0 + windSpeed * 3.0)) * 0.01 * windSpeed;
-          pos += normal * pulse;
-          
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
-        }
-      `,
-      fragmentShader: `
-        uniform float time;
-        uniform vec3 color;
-        uniform vec3 emissiveColor;
-        uniform float opacity;
-        uniform float windSpeed;
-        
-        varying vec3 vPosition;
-        
-        void main() {
-          // Pulse effect based on wind speed
-          float pulse = sin(time * (3.0 + windSpeed * 5.0)) * 0.2 + 0.8;
-          
-          // Grid pattern for UI feel
-          vec2 gridUV = fract(vPosition.xy * 4.0);
-          float grid = step(0.9, max(gridUV.x, gridUV.y)) * 0.2;
-          
-          // Base color with subtle emissive
-          vec3 finalColor = color + emissiveColor * pulse * 0.3;
-          
-          // Add grid highlights
-          finalColor += vec3(0.2, 0.4, 1.0) * grid * pulse;
-          
-          // Wind speed intensity effect
-          finalColor *= (0.8 + windSpeed * 0.3);
-          
-          gl_FragColor = vec4(finalColor, opacity);
-        }
-      `,
-      transparent: true,
-      side: THREE.DoubleSide
-    });
+  // Basic color mapping
+  let color;
+  if (speed < 20) {
+    color = 0x00AA00; // Dark green - calm
+  } else if (speed < 35) {
+    color = 0x66FF66; // Light green - light
+  } else if (speed < 50) {
+    color = 0xFFFF00; // Yellow - moderate
+  } else if (speed < 65) {
+    color = 0xFF8800; // Orange - strong
   } else {
-    // Original basic color mapping
-    let color;
-    if (speed < 20) {
-      color = 0x00AA00; // Dark green - calm
-    } else if (speed < 35) {
-      color = 0x66FF66; // Light green - light
-    } else if (speed < 50) {
-      color = 0xFFFF00; // Yellow - moderate
-    } else if (speed < 65) {
-      color = 0xFF8800; // Orange - strong
-    } else {
-      color = 0xFF0000; // Red - very strong
-    }
-    
-    // Create basic material
-    material = new THREE.MeshLambertMaterial({ 
-      color: color,
-      transparent: true,
-      opacity: settings.cubeOpacity
-    });
+    color = 0xFF0000; // Red - very strong
   }
+  
+  // Create basic material
+  const material = new THREE.MeshLambertMaterial({ 
+    color: color,
+    transparent: true,
+    opacity: settings.cubeOpacity
+  });
   
   const cube = new THREE.Mesh(geometry, material);
   cube.position.set(x, y, z);
   cube.userData = { 
     speed: speed, 
     flightLevel: flightLevel,
-    yLevel: y / 2, // Adjust for hover grouping
-    material: settings.enableEffects ? material : null // Store reference for updates only if using effects
+    yLevel: y / 2 // Adjust for hover grouping
   };
   
   scene.add(cube);
@@ -843,12 +579,7 @@ function onMouseMove(event) {
         targetOpacity = settings.cubeOpacity;
       }
       
-      // Update opacity based on material type
-      if (cube.userData.material && cube.userData.material.uniforms) {
-        cube.userData.material.uniforms.opacity.value = targetOpacity;
-      } else {
-        cube.material.opacity = targetOpacity;
-      }
+      cube.material.opacity = targetOpacity;
     });
   } else {
     isHovering = false;
@@ -870,12 +601,7 @@ function onMouseMove(event) {
           targetOpacity = settings.cubeOpacity; // Use GUI setting
         }
         
-        // Update opacity based on material type
-        if (cube.userData.material && cube.userData.material.uniforms) {
-          cube.userData.material.uniforms.opacity.value = targetOpacity;
-        } else {
-          cube.material.opacity = targetOpacity;
-        }
+        cube.material.opacity = targetOpacity;
       });
     }
     // If no selection, opacity will be handled by distance calculation in animate()
@@ -986,12 +712,7 @@ function onTouchMove(event) {
           targetOpacity = settings.cubeOpacity;
         }
         
-        // Update opacity based on material type
-        if (cube.userData.material && cube.userData.material.uniforms) {
-          cube.userData.material.uniforms.opacity.value = targetOpacity;
-        } else {
-          cube.material.opacity = targetOpacity;
-        }
+        cube.material.opacity = targetOpacity;
       });
     } else {
       isHovering = false;
@@ -1010,12 +731,7 @@ function onTouchMove(event) {
             targetOpacity = settings.cubeOpacity; // Use GUI setting
           }
           
-          // Update opacity based on material type
-          if (cube.userData.material && cube.userData.material.uniforms) {
-            cube.userData.material.uniforms.opacity.value = targetOpacity;
-          } else {
-            cube.material.opacity = targetOpacity;
-          }
+          cube.material.opacity = targetOpacity;
         });
       }
     }
@@ -1071,12 +787,7 @@ function onTouchEnd(event) {
           targetOpacity = settings.cubeOpacity;
         }
         
-        // Update opacity based on material type
-        if (cube.userData.material && cube.userData.material.uniforms) {
-          cube.userData.material.uniforms.opacity.value = targetOpacity;
-        } else {
-          cube.material.opacity = targetOpacity;
-        }
+        cube.material.opacity = targetOpacity;
       });
     }
   }
@@ -1093,16 +804,12 @@ function selectFlightLevel(yLevel) {
   windCubes.forEach(cube => {
     if (cube.userData.yLevel === yLevel) {
       // Highlight selected level
-      if (cube.userData.material && cube.userData.material.uniforms) {
-        cube.userData.material.uniforms.opacity.value = 0.5;
-      } else {
-        cube.material.opacity = 0.5;
-      }
+      cube.material.opacity = 0.5;
       
-      // Add wireframe outline based on effects setting
+      // Add wireframe outline
       const wireframeGeometry = new THREE.BoxGeometry(2, 2, 2);
       const wireframeMaterial = new THREE.MeshBasicMaterial({
-        color: settings.enableEffects ? 0x00ffff : 0xffffff, // Cyan for effects, white for basic
+        color: 0xffffff, // White wireframe
         wireframe: true,
         transparent: true,
         opacity: 0.8
@@ -1113,11 +820,7 @@ function selectFlightLevel(yLevel) {
       selectedCubes.push(wireframe);
     } else {
       // Use GUI setting for dimmed levels
-      if (cube.userData.material && cube.userData.material.uniforms) {
-        cube.userData.material.uniforms.opacity.value = settings.cubeOpacity;
-      } else {
-        cube.material.opacity = settings.cubeOpacity;
-      }
+      cube.material.opacity = settings.cubeOpacity;
     }
   });
   updateMiniMap(); // Update mini map when flight level is selected
@@ -1135,11 +838,7 @@ function deselectFlightLevel() {
   
   // Reset all cube opacities to default
   windCubes.forEach(cube => {
-    if (cube.userData.material && cube.userData.material.uniforms) {
-      cube.userData.material.uniforms.opacity.value = settings.cubeOpacity;
-    } else {
-      cube.material.opacity = settings.cubeOpacity;
-    }
+    cube.material.opacity = settings.cubeOpacity;
   });
   updateMiniMap(); // Update mini map when flight level is deselected
 }
@@ -1152,11 +851,6 @@ function onWindowResize() {
   camera.aspect = rect.width / rect.height;
   camera.updateProjectionMatrix();
   renderer.setSize(rect.width, rect.height);
-  
-  // Only resize composer when effects are enabled
-  if (settings.enableEffects && composer) {
-    composer.setSize(rect.width, rect.height);
-  }
 }
 
 // Animation loop
@@ -1165,22 +859,6 @@ function animate() {
   
   // Update controls
   controls.update();
-  
-  // Update time for post-processing effects (only when effects are enabled)
-  if (settings.enableEffects) {
-    time = clock.getElapsedTime();
-    if (window.uiEffectsPass) {
-      window.uiEffectsPass.uniforms.time.value = time;
-    }
-
-    // Update cube materials with time and effects
-    windCubes.forEach(cube => {
-      if (cube.userData.material && cube.userData.material.uniforms) {
-        // Update time uniform for animation
-        cube.userData.material.uniforms.time.value = time;
-      }
-    });
-  }
 
   // Update cube opacity based on camera distance only when not hovering and not selected
   if (!isHovering && selectedFlightLevel === null) {
@@ -1188,22 +866,12 @@ function animate() {
     windCubes.forEach(cube => {
       const distance = cameraPosition.distanceTo(cube.position);
       const opacity = Math.max(0.02, Math.min(settings.cubeOpacity, (80 - distance) / 80)); // Use GUI setting as max
-      
-      // Update shader material opacity
-      if (cube.userData.material && cube.userData.material.uniforms) {
-        cube.userData.material.uniforms.opacity.value = opacity;
-      } else {
-        cube.material.opacity = opacity;
-      }
+      cube.material.opacity = opacity;
     });
   }
   
-  // Render main scene - use composer with effects or basic renderer
-  if (settings.enableEffects) {
-    composer.render(); // Render through composer with post-processing
-  } else {
-    renderer.render(scene, camera); // Basic rendering without effects
-  }
+  // Render main scene
+  renderer.render(scene, camera);
   
   // Render mini map if visible
   if (miniMapRenderer && selectedFlightLevel !== null) {
@@ -1216,21 +884,13 @@ function updateCubeOpacity() {
   // Only update if no specific hover/selection state is active
   if (!isHovering && selectedFlightLevel === null) {
     windCubes.forEach(cube => {
-      if (cube.userData.material && cube.userData.material.uniforms) {
-        cube.userData.material.uniforms.opacity.value = settings.cubeOpacity;
-      } else {
-        cube.material.opacity = settings.cubeOpacity;
-      }
+      cube.material.opacity = settings.cubeOpacity;
     });
   } else if (selectedFlightLevel !== null) {
     // Update dimmed cubes in selection state
     windCubes.forEach(cube => {
       if (cube.userData.yLevel !== selectedFlightLevel) {
-        if (cube.userData.material && cube.userData.material.uniforms) {
-          cube.userData.material.uniforms.opacity.value = settings.cubeOpacity;
-        } else {
-          cube.material.opacity = settings.cubeOpacity;
-        }
+        cube.material.opacity = settings.cubeOpacity;
       }
     });
   }
