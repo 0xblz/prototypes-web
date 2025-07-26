@@ -209,6 +209,9 @@ const settings = {
   currentTime: '14:00',
   thunderstormActive: false, // New setting for thunderstorm
   thunderstormPosition: { x: 0, z: 0 }, // Center of storm
+  hurricaneActive: false, // New setting for hurricane
+  hurricanePosition: { x: 0, z: 0 }, // Center of hurricane
+  hurricaneIntensity: 3, // Category 1-5 hurricane
   prevDate: function() { changeDate(-1); },
   nextDate: function() { changeDate(1); },
   prevTime: function() { changeTime(-1); },
@@ -217,6 +220,14 @@ const settings = {
     // Move storm to new random position if active
     if (settings.thunderstormActive) {
       settings.thunderstormPosition = {
+        x: Math.random() * 16 - 8, // Random position between -8 and 8
+        z: Math.random() * 16 - 8
+      };
+    }
+    
+    // Move hurricane to new random position if active
+    if (settings.hurricaneActive) {
+      settings.hurricanePosition = {
         x: Math.random() * 16 - 8, // Random position between -8 and 8
         z: Math.random() * 16 - 8
       };
@@ -532,6 +543,33 @@ function createGUI() {
       updateMiniMap();
     }
   });
+  
+  // Add hurricane toggle to Simulations folder
+  simulationsFolder.add(settings, 'hurricaneActive').name('Hurricane').onChange(function(value) {
+    // Move hurricane to random position when activated
+    if (value) {
+      settings.hurricanePosition = {
+        x: Math.random() * 16 - 8, // Random position between -8 and 8
+        z: Math.random() * 16 - 8
+      };
+    }
+    regenerateWindData();
+    if (selectedFlightLevel !== null) {
+      updateMiniMap();
+    }
+  });
+  
+  // Add hurricane intensity control (only shows when hurricane is active)
+  const hurricaneIntensityController = simulationsFolder.add(settings, 'hurricaneIntensity', 1, 5, 1).name('Hurricane Category');
+  hurricaneIntensityController.onChange(function(value) {
+    if (settings.hurricaneActive) {
+      regenerateWindData();
+      if (selectedFlightLevel !== null) {
+        updateMiniMap();
+      }
+    }
+  });
+  
   simulationsFolder.open(); // Start with simulations folder open
   
   // Date and time controls folder
@@ -862,8 +900,63 @@ function generateWindDirection(x, y, z, windPattern) {
   // Start with eastward direction, but vary significantly by altitude
   let directionAngle = 0; // Degrees from east (0° = due east)
   
-  // Add thunderstorm rotation if active
-  if (settings.thunderstormActive) {
+  // Add hurricane rotation if active (takes precedence over thunderstorm)
+  if (settings.hurricaneActive) {
+    const dx = x - settings.hurricanePosition.x;
+    const dz = z - settings.hurricanePosition.z;
+    const distanceFromCenter = Math.sqrt(dx * dx + dz * dz);
+    
+    // Hurricane structure parameters based on category
+    const eyeRadius = 0.5 + (settings.hurricaneIntensity * 0.2); // Eye: 0.7-1.5 units
+    const eyeWallRadius = eyeRadius + 0.8; // Eye wall: ~1.5-2.3 units
+    const spiralRadius = 8 + (settings.hurricaneIntensity * 2); // Outer bands: 10-18 units
+    
+    if (distanceFromCenter < eyeRadius) {
+      // Eye of the hurricane - calm winds
+      directionAngle += Math.random() * 60 - 30; // Light, variable winds
+      return new THREE.Vector3(
+        Math.cos(directionAngle * Math.PI / 180) * 0.1, // Very light winds
+        0,
+        Math.sin(directionAngle * Math.PI / 180) * 0.1
+      ).normalize();
+    } else if (distanceFromCenter < eyeWallRadius) {
+      // Eye wall - strongest winds, tight circulation
+      const hurricaneAngle = Math.atan2(dz, dx) * 180 / Math.PI;
+      // Counterclockwise rotation (Northern Hemisphere)
+      const rotationAngle = hurricaneAngle + 90; // Tangential flow
+      
+      // Add inward spiral component
+      const spiralAngle = rotationAngle - 15; // 15° inward spiral
+      
+      // Add altitude-based variations (stronger at mid-levels)
+      const altitudeEffect = Math.sin((y / 10) * Math.PI) * 10;
+      
+      directionAngle = spiralAngle + altitudeEffect;
+    } else if (distanceFromCenter < spiralRadius) {
+      // Spiral bands - decreasing intensity with distance
+      const hurricaneAngle = Math.atan2(dz, dx) * 180 / Math.PI;
+      // Counterclockwise rotation with increasing spiral angle
+      const spiralIntensity = 1 - ((distanceFromCenter - eyeWallRadius) / (spiralRadius - eyeWallRadius));
+      const spiralAngle = hurricaneAngle + 90 - (30 * spiralIntensity); // More inward spiral farther out
+      
+      // Add spiral band variations
+      const bandEffect = Math.sin(distanceFromCenter * 2 + hurricaneAngle * 0.1) * 15;
+      
+      // Add vertical shear effects at higher altitudes
+      const shearEffect = (y > 6) ? (y - 6) * 5 : 0; // Westerly shear aloft
+      
+      directionAngle = spiralAngle + bandEffect + shearEffect;
+    } else {
+      // Outside hurricane influence - normal pattern with outflow aloft
+      if (y > 8) {
+        // Upper-level outflow (anticyclonic)
+        const hurricaneAngle = Math.atan2(dz, dx) * 180 / Math.PI;
+        const outflowAngle = hurricaneAngle - 90; // Clockwise outflow
+        const outflowIntensity = Math.exp(-(distanceFromCenter - spiralRadius) / 3);
+        directionAngle += outflowAngle * outflowIntensity * 0.3;
+      }
+    }
+  } else if (settings.thunderstormActive) {
     const dx = x - settings.thunderstormPosition.x;
     const dz = z - settings.thunderstormPosition.z;
     const distanceFromStorm = Math.sqrt(dx * dx + dz * dz);
@@ -1028,8 +1121,68 @@ function getWindSpeedForPattern(pattern, x, y, z) {
   const randomFactor = Math.sin(timeSeed * 0.001 + x * 0.3 + y * 0.5 + z * 0.7) * 15;
   speed += randomFactor;
 
-  // Add thunderstorm effects if active
-  if (settings.thunderstormActive) {
+  // Add hurricane effects if active (takes precedence over thunderstorm)
+  if (settings.hurricaneActive) {
+    // Calculate distance from hurricane center
+    const dx = x - settings.hurricanePosition.x;
+    const dz = z - settings.hurricanePosition.z;
+    const distanceFromCenter = Math.sqrt(dx * dx + dz * dz);
+    
+    // Hurricane structure parameters based on category
+    const eyeRadius = 0.5 + (settings.hurricaneIntensity * 0.2); // Eye: 0.7-1.5 units
+    const eyeWallRadius = eyeRadius + 0.8; // Eye wall: ~1.5-2.3 units
+    const spiralRadius = 8 + (settings.hurricaneIntensity * 2); // Outer bands: 10-18 units
+    
+    // Hurricane wind speeds by category (sustained winds in knots)
+    const categoryWinds = [0, 74, 96, 111, 131, 157]; // Cat 0-5
+    const maxWind = categoryWinds[settings.hurricaneIntensity];
+    
+    if (distanceFromCenter < eyeRadius) {
+      // Eye of the hurricane - very calm
+      speed = 5 + Math.random() * 10; // 5-15 knots, light and variable
+    } else if (distanceFromCenter < eyeWallRadius) {
+      // Eye wall - maximum winds
+      const eyeWallIntensity = 1 - ((distanceFromCenter - eyeRadius) / (eyeWallRadius - eyeRadius));
+      speed = maxWind * 0.7 + (maxWind * 0.3 * eyeWallIntensity); // 70-100% of max winds
+      
+      // Add turbulence and gusts in eye wall
+      const turbulence = (Math.sin(x * 3 + y * 2 + z * 2.5) + 
+                         Math.cos(x * 2 + y * 2.5 + z * 2)) * 20;
+      speed += turbulence;
+      
+      // Stronger at mid-levels (typical hurricane structure)
+      const verticalProfile = Math.sin((y / 10) * Math.PI);
+      speed *= (0.7 + verticalProfile * 0.3);
+      
+    } else if (distanceFromCenter < spiralRadius) {
+      // Spiral bands - decreasing intensity with distance
+      const bandIntensity = 1 - ((distanceFromCenter - eyeWallRadius) / (spiralRadius - eyeWallRadius));
+      speed = maxWind * 0.3 + (maxWind * 0.4 * bandIntensity); // 30-70% of max winds
+      
+      // Add spiral band variability
+      const bandVariation = Math.sin(distanceFromCenter * 1.5 + Date.now() * 0.001) * 15;
+      speed += bandVariation;
+      
+      // Feeder band effects
+      const feederBandEffect = Math.cos(distanceFromCenter * 0.8) * 10;
+      speed += feederBandEffect;
+      
+    } else {
+      // Outside main circulation - add outflow effects at upper levels
+      if (y > 8) {
+        const outflowIntensity = Math.exp(-(distanceFromCenter - spiralRadius) / 4);
+        speed += outflowIntensity * 25; // Upper-level outflow
+      } else {
+        // Surface inflow
+        const inflowIntensity = Math.exp(-(distanceFromCenter - spiralRadius) / 6);
+        speed += inflowIntensity * 15; // Low-level inflow
+      }
+    }
+    
+    // Ensure realistic minimum speeds
+    speed = Math.max(5, speed);
+    
+  } else if (settings.thunderstormActive) {
     // Calculate distance from storm center
     const dx = x - settings.thunderstormPosition.x;
     const dz = z - settings.thunderstormPosition.z;
@@ -1107,7 +1260,53 @@ function createWindCube(x, y, z, speed, flightLevel) {
   
   // Basic color mapping with thunderstorm effects
   let color;
-  if (settings.thunderstormActive) {
+  if (settings.hurricaneActive) {
+    const dx = x - settings.hurricanePosition.x;
+    const dz = z - settings.hurricanePosition.z;
+    const distanceFromCenter = Math.sqrt(dx * dx + dz * dz);
+    
+    // Hurricane structure parameters
+    const eyeRadius = 0.5 + (settings.hurricaneIntensity * 0.2);
+    const eyeWallRadius = eyeRadius + 0.8;
+    const spiralRadius = 8 + (settings.hurricaneIntensity * 2);
+    
+    if (distanceFromCenter < eyeRadius) {
+      // Eye - calm, blue-white color
+      color = new THREE.Color(0x87CEEB); // Sky blue for calm eye
+    } else if (distanceFromCenter < eyeWallRadius) {
+      // Eye wall - intense purple/magenta for maximum winds
+      const intensity = 1 - ((distanceFromCenter - eyeRadius) / (eyeWallRadius - eyeRadius));
+      color = new THREE.Color(0xFF00FF).lerp(new THREE.Color(0x8B0000), intensity); // Magenta to dark red
+      
+      // Add pulsing effect to eye wall
+      const pulseIntensity = (Math.sin(Date.now() * 0.003) + 1) * 0.5;
+      color.multiplyScalar(0.8 + pulseIntensity * 0.2);
+    } else if (distanceFromCenter < spiralRadius) {
+      // Spiral bands - gradient from red to orange to yellow
+      const bandIntensity = 1 - ((distanceFromCenter - eyeWallRadius) / (spiralRadius - eyeWallRadius));
+      
+      if (speed > 60) {
+        color = new THREE.Color(0xFF0000).lerp(new THREE.Color(0xFF8800), 1 - bandIntensity);
+      } else if (speed > 40) {
+        color = new THREE.Color(0xFF8800).lerp(new THREE.Color(0xFFFF00), 1 - bandIntensity);
+      } else {
+        color = new THREE.Color(0xFFFF00).lerp(new THREE.Color(0x66FF66), 1 - bandIntensity);
+      }
+    } else {
+      // Outside hurricane - normal wind speed coloring
+      if (speed < 20) {
+        color = 0x00AA00; // Dark green - calm
+      } else if (speed < 35) {
+        color = 0x66FF66; // Light green - light
+      } else if (speed < 50) {
+        color = 0xFFFF00; // Yellow - moderate
+      } else if (speed < 65) {
+        color = 0xFF8800; // Orange - strong
+      } else {
+        color = 0xFF0000; // Red - very strong
+      }
+    }
+  } else if (settings.thunderstormActive) {
     const dx = x - settings.thunderstormPosition.x;
     const dz = z - settings.thunderstormPosition.z;
     const distanceFromStorm = Math.sqrt(dx * dx + dz * dz);
