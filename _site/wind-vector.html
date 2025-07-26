@@ -1249,7 +1249,7 @@ function updateMiniMap() {
         miniCube.position.copy(cube.position);
         miniCube.position.y = 0; // Flatten to ground level for top view
         miniCube.material = cube.material.clone();
-        miniCube.material.opacity = 0.3; // Further reduced opacity to see map better
+        miniCube.material.opacity = 0.25; // Further reduced opacity to see map better
         miniMapScene.add(miniCube);
         miniMapCubes.push(miniCube);
         
