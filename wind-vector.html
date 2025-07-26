@@ -1374,12 +1374,28 @@ function onMouseMove(event) {
     const gridX = Math.round((hoveredCube.position.x + 9) / 2);
     const gridZ = Math.round((hoveredCube.position.z + 9) / 2);
     
+    // Get current region bounds
+    const regionBounds = regions[settings.region].bounds;
+    
+    // Convert grid position to geographic coordinates
+    // Interpolate between region bounds based on normalized grid position
+    const normalizedX = (hoveredCube.position.x + 10) / 20; // Convert -10 to 10 to 0 to 1
+    const normalizedZ = (hoveredCube.position.z + 10) / 20; // Convert -10 to 10 to 0 to 1
+    
+    // Calculate lat/lon using region bounds
+    const lat = regionBounds[0][0] + (regionBounds[1][0] - regionBounds[0][0]) * normalizedZ;
+    const lon = regionBounds[0][1] + (regionBounds[1][1] - regionBounds[0][1]) * normalizedX;
+    
     // Calculate wind direction in degrees (from wind direction vector)
     const windDir = hoveredCube.userData.windDirection;
     const windAngle = Math.atan2(windDir.z, windDir.x) * 180 / Math.PI;
     const windDirection = ((windAngle + 360) % 360).toFixed(0); // Convert to 0-360 degrees
     
-    tooltip.innerHTML = `FL${String(flightLevel).padStart(3, '0')}<br/>Wind: ${windSpeed} kt @ ${windDirection}°<br/>Grid: ${gridX}, ${gridZ}`;
+    // Format coordinates to 2 decimal places
+    const latStr = Math.abs(lat).toFixed(2) + '°' + (lat >= 0 ? 'N' : 'S');
+    const lonStr = Math.abs(lon).toFixed(2) + '°' + (lon >= 0 ? 'E' : 'W');
+    
+    tooltip.innerHTML = `FL${String(flightLevel).padStart(3, '0')}<br/>Wind: ${windSpeed} kt @ ${windDirection}°<br/>${latStr} ${lonStr}`;
     
     // Only apply hover effects if no flight level is currently selected
     if (selectedFlightLevel === null) {
