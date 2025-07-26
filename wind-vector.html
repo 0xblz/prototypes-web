@@ -149,7 +149,10 @@ let resizeStartMouse = { x: 0, y: 0 };
 
 // Date and time control variables
 let currentDate = new Date();
-let currentTime = { hour: 14, minute: 0 }; // Default to 14:00 (2 PM)
+let currentTime = {
+  hour: currentDate.getHours(),
+  minute: currentDate.getMinutes()
+}; // Initialize with current system time
 
 // Leaflet map variables
 let leafletMap;
@@ -454,18 +457,31 @@ function createGUI() {
     updateMapStyle(value);
   });
   
+  // Create Options folder
+  const optionsFolder = gui.addFolder('Options');
+  
   // Background color toggle
-  gui.add(settings, 'darkBackground').name('Dark Background').onChange(function(value) {
+  optionsFolder.add(settings, 'darkBackground').name('Dark Background').onChange(function(value) {
     updateBackgroundColor(value);
   });
   
   // Wind arrows toggle
-  gui.add(settings, 'showWindArrows').name('Wind Arrows').onChange(function(value) {
+  optionsFolder.add(settings, 'showWindArrows').name('Wind Arrows').onChange(function(value) {
     toggleWindArrows(value);
   });
-
-  // Add thunderstorm toggle
-  gui.add(settings, 'thunderstormActive').name('Thunderstorm').onChange(function(value) {
+  
+  // Opacity control
+  optionsFolder.add(settings, 'cubeOpacity', 0.01, 0.3).name('Cube Opacity').onChange(function(value) {
+    updateCubeOpacity();
+  });
+  
+  optionsFolder.open(); // Start with options folder open
+  
+  // Create Simulations folder
+  const simulationsFolder = gui.addFolder('Simulations');
+  
+  // Add thunderstorm toggle to Simulations folder
+  simulationsFolder.add(settings, 'thunderstormActive').name('Thunderstorm').onChange(function(value) {
     // Move storm to random position when activated
     if (value) {
       settings.thunderstormPosition = {
@@ -478,6 +494,7 @@ function createGUI() {
       updateMiniMap();
     }
   });
+  simulationsFolder.open(); // Start with simulations folder open
   
   // Date and time controls folder
   const timeFolder = gui.addFolder('Date & Time');
@@ -496,11 +513,6 @@ function createGUI() {
   timeFolder.add(settings, 'prevTime').name('← Previous Hour');
   timeFolder.add(settings, 'nextTime').name('Next Hour →');
   timeFolder.open(); // Start with time folder open
-  
-  // Opacity control
-  gui.add(settings, 'cubeOpacity', 0.01, 0.3).name('Cube Opacity').onChange(function(value) {
-    updateCubeOpacity();
-  });
   
   // Wind randomization button
   gui.add(settings, 'randomizeWind').name('Randomize Wind');
