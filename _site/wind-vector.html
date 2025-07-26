@@ -790,7 +790,12 @@ const WindGenerator = {
 
   clearExisting() {
     AppState.windCubes.forEach(cube => AppState.scene.remove(cube));
-    AppState.windArrows.forEach(arrow => AppState.scene.remove(arrow));
+    // Remove HTML arrows from DOM
+    AppState.windArrows.forEach(arrow => {
+      if (arrow.parentNode) {
+        arrow.parentNode.removeChild(arrow);
+      }
+    });
     AppState.windCubes = [];
     AppState.windArrows = [];
   },
@@ -829,44 +834,48 @@ const WindGenerator = {
       windDirection: windDirection
     };
     
-    // Create arrow
+    // Create arrow (HTML element, not added to scene)
     const arrow = this.createArrow(cube, windDirection, speed);
     
     AppState.scene.add(cube);
-    AppState.scene.add(arrow);
     AppState.windCubes.push(cube);
     AppState.windArrows.push(arrow);
   },
 
   createArrow(cube, windDirection, speed) {
-    const arrow = new THREE.Mesh(AppState.arrowGeometry.clone(), AppState.arrowMaterial.clone());
+    // Create HTML/CSS arrow like the mini map (for perfect matching)
+    const arrow = document.createElement('div');
+    arrow.className = 'wind-arrow-3d';
+    arrow.style.position = 'absolute';
+    arrow.style.width = '0';
+    arrow.style.height = '0';
+    arrow.style.borderLeft = '6px solid transparent';
+    arrow.style.borderRight = '6px solid transparent';
+    arrow.style.borderBottom = '16px solid #00ddff';
+    arrow.style.transformOrigin = 'center bottom';
+    arrow.style.pointerEvents = 'none';
+    arrow.style.zIndex = '1000';
+    // Removed expensive drop-shadow for better performance
     
-    arrow.position.set(cube.position.x, cube.position.y + 1.5, cube.position.z);
+    // Use exact same calculation as mini map
+    const windAngle = Math.atan2(windDirection.x, -windDirection.z) * 180 / Math.PI;
+    const bankingEffect = Math.sin((cube.position.x + cube.position.z) * 0.3) * 5;
+    const speedBanking = (speed - 50) / 10;
+    const totalRotation = windAngle + bankingEffect + speedBanking;
     
-    // Base rotation
-    arrow.rotation.x = Math.PI / 2;
-    arrow.rotation.y = 0;
-    arrow.rotation.z = -Math.PI / 2;
+    // Scale based on wind speed (same as mini map)
+    const scale = 0.6 + (speed / 100) * 0.4;
+    arrow.style.transform = `translate(-50%, -100%) rotate(${totalRotation}deg) scale(${scale})`;
     
-    // Wind direction
-    const windAngle = Math.atan2(windDirection.z, windDirection.x);
-    arrow.rotation.y += windAngle * 0.3;
-    
-    // Banking effects
-    const bankingFactor = Math.sin((cube.position.x + cube.position.z) * 0.3) * 0.08;
-    const speedBanking = (speed - 50) / 300;
-    const altitudeBanking = cube.position.y * 0.005;
-    arrow.rotation.z += bankingFactor + speedBanking + altitudeBanking;
-    
-    // Scale
-    const arrowScale = 0.4 + (speed / 100) * 0.3;
-    arrow.scale.setScalar(arrowScale);
-    
-    arrow.visible = false;
+    arrow.style.display = 'none'; // Hidden by default
     arrow.userData = { 
       cubeIndex: AppState.windCubes.length,
-      yLevel: cube.position.y / CONSTANTS.GRID.SPACING
+      yLevel: cube.position.y / CONSTANTS.GRID.SPACING,
+      cube: cube // Store reference to cube for position updates
     };
+    
+    // Add to document
+    document.body.appendChild(arrow);
     
     return arrow;
   },
@@ -928,10 +937,53 @@ const SelectionManager = {
 
   updateArrowVisibility() {
     AppState.windArrows.forEach(arrow => {
-      arrow.visible = Config.settings.showWindArrows && 
-                     AppState.selectedFlightLevel !== null && 
-                     arrow.userData.yLevel === AppState.selectedFlightLevel;
+      const shouldShow = Config.settings.showWindArrows && 
+                        AppState.selectedFlightLevel !== null && 
+                        arrow.userData.yLevel === AppState.selectedFlightLevel;
+      arrow.style.display = shouldShow ? 'block' : 'none';
     });
+    
+    // Update arrow positions if visible
+    if (Config.settings.showWindArrows && AppState.selectedFlightLevel !== null) {
+      this.updateArrowPositions();
+    }
+  },
+
+  updateArrowPositions() {
+    AppState.windArrows.forEach(arrow => {
+      if (arrow.style.display === 'block') {
+        const cube = arrow.userData.cube;
+        const screenPosition = this.worldToScreen(cube.position.x, cube.position.y + 1.5, cube.position.z);
+        
+        if (screenPosition) {
+          arrow.style.left = screenPosition.x + 'px';
+          arrow.style.top = screenPosition.y + 'px';
+          arrow.style.visibility = 'visible';
+        } else {
+          // Hide arrows that are outside canvas bounds or behind camera
+          arrow.style.visibility = 'hidden';
+        }
+      }
+    });
+  },
+
+  worldToScreen(x, y, z) {
+    const vector = new THREE.Vector3(x, y, z);
+    vector.project(AppState.camera);
+    
+    const canvas = AppState.renderer.domElement;
+    const rect = canvas.getBoundingClientRect();
+    
+    const screenX = (vector.x * 0.5 + 0.5) * rect.width + rect.left;
+    const screenY = (-vector.y * 0.5 + 0.5) * rect.height + rect.top;
+    
+    // Only return position if in front of camera AND within canvas bounds
+    if (vector.z < 1 && 
+        screenX >= rect.left && screenX <= rect.right &&
+        screenY >= rect.top && screenY <= rect.bottom) {
+      return { x: screenX, y: screenY };
+    }
+    return null;
   },
 
   toggleWindArrows(showArrows) {
@@ -1037,6 +1089,11 @@ const EventHandlers = {
     AppState.camera.aspect = rect.width / rect.height;
     AppState.camera.updateProjectionMatrix();
     AppState.renderer.setSize(rect.width, rect.height);
+    
+    // Update arrow positions after resize
+    if (Config.settings.showWindArrows && AppState.selectedFlightLevel !== null) {
+      SelectionManager.updateArrowPositions();
+    }
   },
 
   onWindowBlur() {
@@ -1088,7 +1145,7 @@ const EventHandlers = {
     UIManager.hideTooltip();
     
     if (AppState.selectedFlightLevel === null) {
-      AppState.windArrows.forEach(arrow => arrow.visible = false);
+      AppState.windArrows.forEach(arrow => arrow.style.display = 'none');
     }
   },
 
@@ -1098,8 +1155,14 @@ const EventHandlers = {
     });
     
     AppState.windArrows.forEach(arrow => {
-      arrow.visible = Config.settings.showWindArrows && arrow.userData.yLevel === hoveredYLevel;
+      const shouldShow = Config.settings.showWindArrows && arrow.userData.yLevel === hoveredYLevel;
+      arrow.style.display = shouldShow ? 'block' : 'none';
     });
+    
+    // Update positions for visible arrows
+    if (Config.settings.showWindArrows) {
+      SelectionManager.updateArrowPositions();
+    }
   },
 
   handleClick() {
@@ -1648,7 +1711,12 @@ const MiniMapManager = {
     arrow.style.left = `${pixelX}px`;
     arrow.style.top = `${pixelZ}px`;
     
-    const windAngle = Math.atan2(windDirection.z, windDirection.x) * 180 / Math.PI;
+    // Calculate wind angle - CSS arrow points UP (north) initially
+    // In 3D: +X = east, +Z = south (toward viewer in top-down view)
+    // In CSS minimap: +X = east, +Y = south (down on screen)
+    // CSS arrow points north initially, so we need angle from north (not east)
+    const windAngle = Math.atan2(windDirection.x, -windDirection.z) * 180 / Math.PI;
+    
     const speed = cube.userData.speed;
     const bankingEffect = Math.sin((cube.position.x + cube.position.z) * 0.3) * 5;
     const speedBanking = (speed - 50) / 10;
@@ -1840,6 +1908,8 @@ const LabelsManager = {
 
 // === ANIMATION LOOP ===
 const AnimationLoop = {
+  frameCount: 0,
+  
   start() {
     this.animate();
   },
@@ -1851,6 +1921,12 @@ const AnimationLoop = {
     
     this.updateCubeOpacity();
     this.animateArrows();
+    
+    // Update 3D arrow positions every 3 frames for better performance
+    this.frameCount++;
+    if (Config.settings.showWindArrows && AppState.selectedFlightLevel !== null && this.frameCount % 3 === 0) {
+      SelectionManager.updateArrowPositions();
+    }
     
     AppState.renderer.render(AppState.scene, AppState.camera);
     
@@ -1873,16 +1949,8 @@ const AnimationLoop = {
   animateArrows() {
     const time = Date.now() * 0.001;
     
-    AppState.windArrows.forEach((arrow, index) => {
-      if (arrow.visible) {
-        if (arrow.userData.baseRotationZ === undefined) {
-          arrow.userData.baseRotationZ = arrow.rotation.z;
-        }
-        
-        const oscillation = Math.sin(time * CONSTANTS.ANIMATION.OSCILLATION_SPEED + index * 0.2) * CONSTANTS.ANIMATION.OSCILLATION_AMPLITUDE;
-        arrow.rotation.z = arrow.userData.baseRotationZ + oscillation;
-      }
-    });
+    // Simplified: removed 3D arrow animation for better performance
+    // 3D arrows remain static while mini map arrows keep their animation
     
     AppState.miniMap.arrows.forEach((arrow, index) => {
       if (!arrow.dataset.baseRotation) {
