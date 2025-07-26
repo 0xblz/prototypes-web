@@ -186,12 +186,40 @@ const settings = {
   showWindArrows: true, // Show wind direction arrows by default
   currentDate: 'Oct 15, 2024',
   currentTime: '14:00',
+  thunderstormActive: false, // New setting for thunderstorm
+  thunderstormPosition: { x: 0, z: 0 }, // Center of storm
   prevDate: function() { changeDate(-1); },
   nextDate: function() { changeDate(1); },
   prevTime: function() { changeTime(-1); },
   nextTime: function() { changeTime(1); },
   randomizeWind: function() {
+    // Move storm to new random position if active
+    if (settings.thunderstormActive) {
+      settings.thunderstormPosition = {
+        x: Math.random() * 16 - 8, // Random position between -8 and 8
+        z: Math.random() * 16 - 8
+      };
+    }
+    
+    // Add random time offset to create new wind patterns
+    const randomHourOffset = Math.floor(Math.random() * 24);
+    const randomDayOffset = Math.floor(Math.random() * 30);
+    
+    // Temporarily adjust time to generate new patterns
+    const originalTime = { ...currentTime };
+    const originalDate = new Date(currentDate);
+    
+    currentTime.hour = (currentTime.hour + randomHourOffset) % 24;
+    currentDate.setDate(currentDate.getDate() + randomDayOffset);
+    
+    // Regenerate wind data with new random patterns
     regenerateWindData();
+    
+    // Restore original time
+    currentTime = originalTime;
+    currentDate = originalDate;
+    updateDateTimeDisplay();
+    
     // Update mini map if a flight level is selected
     if (selectedFlightLevel !== null) {
       setTimeout(() => {
@@ -433,6 +461,9 @@ function initScene() {
 function createGUI() {
   gui = new dat.GUI();
   
+  // Increase GUI width to accommodate longer labels
+  gui.width = 300;
+  
   // Region selector
   gui.add(settings, 'region', Object.keys(regions)).name('US Region').onChange(function(value) {
     updateRegion(value);
@@ -449,8 +480,23 @@ function createGUI() {
   });
   
   // Wind arrows toggle
-  gui.add(settings, 'showWindArrows').name('Show Wind Arrows').onChange(function(value) {
+  gui.add(settings, 'showWindArrows').name('Wind Arrows').onChange(function(value) {
     toggleWindArrows(value);
+  });
+
+  // Add thunderstorm toggle
+  gui.add(settings, 'thunderstormActive').name('Thunderstorm').onChange(function(value) {
+    // Move storm to random position when activated
+    if (value) {
+      settings.thunderstormPosition = {
+        x: Math.random() * 16 - 8, // Random position between -8 and 8
+        z: Math.random() * 16 - 8
+      };
+    }
+    regenerateWindData();
+    if (selectedFlightLevel !== null) {
+      updateMiniMap();
+    }
   });
   
   // Date and time controls folder
@@ -717,6 +763,31 @@ function generateWindDirection(x, y, z, windPattern) {
   // Start with eastward direction, but vary significantly by altitude
   let directionAngle = 0; // Degrees from east (0° = due east)
   
+  // Add thunderstorm rotation if active
+  if (settings.thunderstormActive) {
+    const dx = x - settings.thunderstormPosition.x;
+    const dz = z - settings.thunderstormPosition.z;
+    const distanceFromStorm = Math.sqrt(dx * dx + dz * dz);
+    
+    // Create rotating wind pattern around storm (cyclonic rotation)
+    const stormAngle = Math.atan2(dz, dx) * 180 / Math.PI;
+    const rotationStrength = Math.exp(-distanceFromStorm / 3) * 180; // Stronger rotation near core
+    
+    // Add vertical wind component near storm core (updrafts/downdrafts)
+    const verticalComponent = Math.sin((y / 10) * Math.PI) * 45;
+    
+    // Add chaotic variations in storm
+    const turbulence = (Math.sin(x * 3 + y * 2 + z * 2.5) + 
+                       Math.cos(x * 2 + y * 2.5 + z * 2)) * 30;
+    
+    directionAngle += stormAngle + rotationStrength + verticalComponent + turbulence;
+    
+    // More chaotic near storm core
+    if (distanceFromStorm < 3) {
+      directionAngle += Math.random() * 60 - 30; // Random ±30° variation
+    }
+  }
+  
   // Altitude-based wind pattern changes (major variations between flight levels)
   const altitudeLayerEffect = getAltitudeWindPattern(flightLevel, x, z);
   directionAngle += altitudeLayerEffect;
@@ -853,7 +924,39 @@ function getWindSpeedForPattern(pattern, x, y, z) {
   // Create a pseudo-random seed based on date and time for consistent patterns
   const timeSeed = currentDate.getTime() + currentTime.hour;
   const seededRandom = (Math.sin(timeSeed + x * 1000 + y * 100 + z * 10) + 1) / 2;
+
+  // Add additional randomization factor
+  const randomFactor = Math.sin(timeSeed * 0.001 + x * 0.3 + y * 0.5 + z * 0.7) * 15;
+  speed += randomFactor;
+
+  // Add thunderstorm effects if active
+  if (settings.thunderstormActive) {
+    // Calculate distance from storm center
+    const dx = x - settings.thunderstormPosition.x;
+    const dz = z - settings.thunderstormPosition.z;
+    const distanceFromStorm = Math.sqrt(dx * dx + dz * dz);
+    
+    // Storm influence decreases with distance (exponential decay)
+    const stormInfluence = Math.exp(-distanceFromStorm / 4);
+    
+    // Add strong vertical development (more intense at mid-levels)
+    const verticalDevelopment = Math.sin((y / 10) * Math.PI) * 30;
+    
+    // Add chaotic variations near the storm
+    const turbulence = (Math.sin(x * 2.5 + y * 1.8 + z * 2.2) + 
+                       Math.cos(x * 1.8 + y * 2.2 + z * 1.5)) * 15;
+    
+    // Combine storm effects
+    const stormEffect = (verticalDevelopment + turbulence) * stormInfluence;
+    speed += stormEffect;
+    
+    // Ensure minimum storm speed and add extra intensity near core
+    if (distanceFromStorm < 3 && y > 2) {
+      speed = Math.max(speed, 70 + (Math.random() * 20)); // Strong storm core
+    }
+  }
   
+  // Continue with existing regional patterns
   switch(pattern) {
     case 'nor_easter':
       // Northeast: Strong easterly flows, coastal influence
@@ -903,18 +1006,50 @@ function createWindCube(x, y, z, speed, flightLevel) {
   const windPattern = regions[settings.region].windPattern;
   const windDirection = generateWindDirection(x, y, z, windPattern);
   
-  // Basic color mapping
+  // Basic color mapping with thunderstorm effects
   let color;
-  if (speed < 20) {
-    color = 0x00AA00; // Dark green - calm
-  } else if (speed < 35) {
-    color = 0x66FF66; // Light green - light
-  } else if (speed < 50) {
-    color = 0xFFFF00; // Yellow - moderate
-  } else if (speed < 65) {
-    color = 0xFF8800; // Orange - strong
+  if (settings.thunderstormActive) {
+    const dx = x - settings.thunderstormPosition.x;
+    const dz = z - settings.thunderstormPosition.z;
+    const distanceFromStorm = Math.sqrt(dx * dx + dz * dz);
+    
+    if (distanceFromStorm < 3 && y > 2) {
+      // Storm core - intense reds
+      color = new THREE.Color(0xFF0000);
+      // Add pulsing effect to storm core
+      const pulseIntensity = (Math.sin(Date.now() * 0.002) + 1) * 0.5;
+      color.multiplyScalar(0.7 + pulseIntensity * 0.3);
+    } else if (distanceFromStorm < 5) {
+      // Storm periphery - orange to red gradient
+      const intensity = Math.max(0.5, 1 - (distanceFromStorm / 5));
+      color = new THREE.Color(0xFF8800).lerp(new THREE.Color(0xFF0000), intensity);
+    } else {
+      // Normal wind speed coloring
+      if (speed < 20) {
+        color = 0x00AA00; // Dark green - calm
+      } else if (speed < 35) {
+        color = 0x66FF66; // Light green - light
+      } else if (speed < 50) {
+        color = 0xFFFF00; // Yellow - moderate
+      } else if (speed < 65) {
+        color = 0xFF8800; // Orange - strong
+      } else {
+        color = 0xFF0000; // Red - very strong
+      }
+    }
   } else {
-    color = 0xFF0000; // Red - very strong
+    // Normal wind speed coloring without storm
+    if (speed < 20) {
+      color = 0x00AA00; // Dark green - calm
+    } else if (speed < 35) {
+      color = 0x66FF66; // Light green - light
+    } else if (speed < 50) {
+      color = 0xFFFF00; // Yellow - moderate
+    } else if (speed < 65) {
+      color = 0xFF8800; // Orange - strong
+    } else {
+      color = 0xFF0000; // Red - very strong
+    }
   }
   
   // Create basic material
