@@ -57,9 +57,9 @@ canvas {
 }
 
 #mini-map-container {
-  position: absolute;
-  bottom: 20px;
-  left: 20px;
+  position: fixed;
+  bottom: max(20px, env(safe-area-inset-bottom));
+  left: max(20px, env(safe-area-inset-left));
   width: 200px;
   height: 200px;
   min-width: 150px;
@@ -114,12 +114,12 @@ canvas {
   border-top-right-radius: 4px;
 }
 
-@media (max-width: 768px) {
+  @media (max-width: 768px) {
   #mini-map-container {
     width: 150px;
     height: 150px;
-    bottom: 15px;
-    left: 15px;
+    bottom: max(15px, env(safe-area-inset-bottom));
+    left: max(15px, env(safe-area-inset-left));
     min-width: 120px;
     min-height: 120px;
     max-width: 300px;
@@ -318,7 +318,7 @@ const Config = {
     cubeOpacity: 0.03,
     mapStyle: 'OpenStreetMap',
     darkBackground: true,
-    showWindArrows: true,
+    showWindArrows: false,
     currentDate: 'Oct 15, 2024',
     currentTime: '14:00',
     thunderstormActive: false,
@@ -1248,7 +1248,7 @@ const UIManager = {
       .onChange(SceneManager.updateBackgroundColor.bind(SceneManager));
     
     optionsFolder.add(Config.settings, 'showWindArrows')
-      .name('Wind Arrows')
+      .name('Wind Direction')
       .onChange(SelectionManager.toggleWindArrows.bind(SelectionManager));
     
     optionsFolder.add(Config.settings, 'cubeOpacity', 0.01, 0.3)
