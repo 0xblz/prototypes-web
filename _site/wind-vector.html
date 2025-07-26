@@ -882,6 +882,24 @@ function regenerateWindData() {
   
   // Generate new cubes and arrows
   generateWindCubes();
+  
+  // Restore selected flight level opacity if one is selected
+  if (selectedFlightLevel !== null) {
+    windCubes.forEach(cube => {
+      if (cube.userData.yLevel === selectedFlightLevel) {
+        // Highlight selected level
+        cube.material.opacity = 0.5;
+      } else {
+        // Use GUI setting for dimmed levels
+        cube.material.opacity = settings.cubeOpacity;
+      }
+    });
+    
+    // Show arrows for selected level if enabled
+    windArrows.forEach(arrow => {
+      arrow.visible = settings.showWindArrows && arrow.userData.yLevel === selectedFlightLevel;
+    });
+  }
 }
 
 // Create reusable arrow geometry and material
