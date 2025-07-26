@@ -31,6 +31,44 @@
     padding: 0;
 }
 
+/* Add styles for date/time navigation */
+.date-nav-container, .time-nav-container {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.date-nav-container .dg .c input[type="text"],
+.time-nav-container .dg .c input[type="text"] {
+  width: 100% !important;
+  text-align: center;
+}
+
+.date-nav-container .dg .c .property-name,
+.time-nav-container .dg .c .property-name {
+  width: 100% !important;
+}
+
+.nav-button {
+  background: #303030;
+  border: 1px solid #505050;
+  color: #fff;
+  padding: 2px 8px;
+  cursor: pointer;
+  font-size: 12px;
+  border-radius: 2px;
+}
+
+.nav-button:hover {
+  background: #404040;
+}
+
+.time-nav-buttons {
+  display: flex;
+  gap: 4px;
+}
+
 canvas {
   display: flex;
   flex-direction: column;
@@ -519,19 +557,88 @@ function createGUI() {
   // Date and time controls folder
   const timeFolder = gui.addFolder('Date & Time');
   
-  // Add read-only date and time displays
+  // Create date controller
   const dateController = timeFolder.add(settings, 'currentDate').name('Date').listen();
+  const dateRow = dateController.domElement.parentElement.parentElement;
+  dateRow.style.display = 'flex';
+  dateRow.style.alignItems = 'center';
+  dateRow.style.gap = '8px';
+  
+  // Get the label element and ensure it's first
+  const dateLabel = dateRow.querySelector('.property-name');
+  dateRow.insertBefore(dateLabel, dateRow.firstChild);
+  
+  // Create date buttons container
+  const dateButtons = document.createElement('div');
+  dateButtons.style.display = 'flex';
+  dateButtons.style.gap = '4px';
+  
+  // Create and add prev/next date buttons
+  const prevDateBtn = document.createElement('button');
+  prevDateBtn.className = 'nav-button';
+  prevDateBtn.textContent = '←';
+  prevDateBtn.onclick = () => settings.prevDate();
+  
+  const nextDateBtn = document.createElement('button');
+  nextDateBtn.className = 'nav-button';
+  nextDateBtn.textContent = '→';
+  nextDateBtn.onclick = () => settings.nextDate();
+  
+  dateButtons.appendChild(prevDateBtn);
+  dateButtons.appendChild(nextDateBtn);
+  dateRow.appendChild(dateButtons);
+  
+  // Make date input read-only and center text
+  const dateInput = dateController.domElement.querySelector('input');
+  dateInput.readOnly = true;
+  dateInput.style.textAlign = 'center';
+  dateInput.style.width = '100%';
+  
+  // Ensure date input container has proper width
+  const dateInputContainer = dateInput.parentElement;
+  dateInputContainer.style.width = '120px'; // Set fixed width for date input
+  
+  // Create time controller
   const timeController = timeFolder.add(settings, 'currentTime').name('Time').listen();
+  const timeRow = timeController.domElement.parentElement.parentElement;
+  timeRow.style.display = 'flex';
+  timeRow.style.alignItems = 'center';
+  timeRow.style.gap = '8px';
   
-  // Make the input fields read-only
-  dateController.domElement.querySelector('input').readOnly = true;
-  timeController.domElement.querySelector('input').readOnly = true;
+  // Get the label element and ensure it's first (same as date)
+  const timeLabel = timeRow.querySelector('.property-name');
+  timeRow.insertBefore(timeLabel, timeRow.firstChild);
   
-  // Add navigation buttons
-  timeFolder.add(settings, 'prevDate').name('← Previous Day');
-  timeFolder.add(settings, 'nextDate').name('Next Day →');
-  timeFolder.add(settings, 'prevTime').name('← Previous Hour');
-  timeFolder.add(settings, 'nextTime').name('Next Hour →');
+  // Create time buttons container
+  const timeButtons = document.createElement('div');
+  timeButtons.style.display = 'flex';
+  timeButtons.style.gap = '4px';
+  
+  // Create and add prev/next time buttons
+  const prevTimeBtn = document.createElement('button');
+  prevTimeBtn.className = 'nav-button';
+  prevTimeBtn.textContent = '←';
+  prevTimeBtn.onclick = () => settings.prevTime();
+  
+  const nextTimeBtn = document.createElement('button');
+  nextTimeBtn.className = 'nav-button';
+  nextTimeBtn.textContent = '→';
+  nextTimeBtn.onclick = () => settings.nextTime();
+  
+  timeButtons.appendChild(prevTimeBtn);
+  timeButtons.appendChild(nextTimeBtn);
+  timeRow.appendChild(timeButtons);
+  
+  // Make time input read-only and center text
+  const timeInput = timeController.domElement.querySelector('input');
+  timeInput.readOnly = true;
+  timeInput.style.textAlign = 'center';
+  timeInput.style.width = '100%';
+  
+  // Ensure time input container has same width as date
+  const timeInputContainer = timeInput.parentElement;
+  timeInputContainer.style.width = '120px'; // Match date input width
+  
   timeFolder.open(); // Start with time folder open
   
   // Wind randomization button
