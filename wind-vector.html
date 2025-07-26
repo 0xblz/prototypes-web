@@ -1358,8 +1358,23 @@ function onMouseMove(event) {
   if (intersects.length > 0) {
     const hoveredCube = intersects[0].object;
     const hoveredYLevel = hoveredCube.userData.yLevel;
-    const flightLevel = hoveredCube.userData.flightLevel;
-    const windSpeed = hoveredCube.userData.speed;
+    
+    // If a flight level is selected, find the cube at the same x,z position but at the selected level
+    let cubeToShow = hoveredCube;
+    if (selectedFlightLevel !== null) {
+      // Find cube at the same x,z position but at selected flight level
+      const targetCube = windCubes.find(cube => 
+        cube.position.x === hoveredCube.position.x && 
+        cube.position.z === hoveredCube.position.z && 
+        cube.userData.yLevel === selectedFlightLevel
+      );
+      if (targetCube) {
+        cubeToShow = targetCube;
+      }
+    }
+    
+    const flightLevel = cubeToShow.userData.flightLevel;
+    const windSpeed = cubeToShow.userData.speed;
     isHovering = true;
     
     // Change cursor to pointer when hovering over cubes
@@ -1370,24 +1385,20 @@ function onMouseMove(event) {
     tooltip.style.left = (event.clientX + 10) + 'px';
     tooltip.style.top = (event.clientY - 10) + 'px';
     
-    // Calculate grid coordinates (convert from world position to grid reference)
-    const gridX = Math.round((hoveredCube.position.x + 9) / 2);
-    const gridZ = Math.round((hoveredCube.position.z + 9) / 2);
-    
     // Get current region bounds
     const regionBounds = regions[settings.region].bounds;
     
     // Convert grid position to geographic coordinates
     // Interpolate between region bounds based on normalized grid position
-    const normalizedX = (hoveredCube.position.x + 10) / 20; // Convert -10 to 10 to 0 to 1
-    const normalizedZ = (hoveredCube.position.z + 10) / 20; // Convert -10 to 10 to 0 to 1
+    const normalizedX = (cubeToShow.position.x + 10) / 20; // Convert -10 to 10 to 0 to 1
+    const normalizedZ = (cubeToShow.position.z + 10) / 20; // Convert -10 to 10 to 0 to 1
     
     // Calculate lat/lon using region bounds
     const lat = regionBounds[0][0] + (regionBounds[1][0] - regionBounds[0][0]) * normalizedZ;
     const lon = regionBounds[0][1] + (regionBounds[1][1] - regionBounds[0][1]) * normalizedX;
     
     // Calculate wind direction in degrees (from wind direction vector)
-    const windDir = hoveredCube.userData.windDirection;
+    const windDir = cubeToShow.userData.windDirection;
     const windAngle = Math.atan2(windDir.z, windDir.x) * 180 / Math.PI;
     const windDirection = ((windAngle + 360) % 360).toFixed(0); // Convert to 0-360 degrees
     
