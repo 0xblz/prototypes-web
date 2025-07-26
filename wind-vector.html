@@ -157,2104 +157,1749 @@ canvas {
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
 <script>
-// 3D Wind Vector Visualization
-let scene, camera, renderer, controls;
-let windCubes = [];
-let windArrows = []; // Track wind direction arrows
-let groundPlane;
-let raycaster, mouse;
-let isHovering = false; // Track hover state
-let selectedFlightLevel = null; // Track selected flight level
-let selectedCubes = []; // Track selected cube outlines
-let arrowGeometry, arrowMaterial; // Reusable arrow geometry and material
-let mouseDownPosition = { x: 0, y: 0 }; // Track mouse down position
-let isDragging = false; // Track if user is dragging
-let gui; // dat.GUI instance
-let tooltip; // Tooltip element
-
-// Mini map variables
-let miniMapScene, miniMapCamera, miniMapRenderer;
-let miniMapCanvas;
-let miniMapContainer;
-let miniMapGroundPlane;
-let miniMapCubes = [];
-let miniMapArrows = []; // HTML arrow elements for mini map
-
-// Mini map resize variables
-let isResizing = false;
-let resizeStartSize = { width: 0, height: 0 };
-let resizeStartMouse = { x: 0, y: 0 };
-
-// Date and time control variables
-let currentDate = new Date();
-let currentTime = {
-  hour: currentDate.getHours(),
-  minute: currentDate.getMinutes()
-}; // Initialize with current system time
-
-// Leaflet map variables
-let leafletMap;
-let mapCanvas;
-let mapContext;
-let mapTexture;
-
-// GUI settings
-const settings = {
-  region: 'Southeast',
-  cubeOpacity: 0.03,
-  mapStyle: 'OpenStreetMap',
-  darkBackground: true, // true = black, false = white
-  showWindArrows: true, // Show wind direction arrows by default
-  currentDate: 'Oct 15, 2024',
-  currentTime: '14:00',
-  thunderstormActive: false, // New setting for thunderstorm
-  thunderstormPosition: { x: 0, z: 0 }, // Center of storm
-  hurricaneActive: false, // New setting for hurricane
-  hurricanePosition: { x: 0, z: 0 }, // Center of hurricane
-  hurricaneIntensity: 3, // Category 1-5 hurricane
-  prevDate: function() { changeDate(-1); },
-  nextDate: function() { changeDate(1); },
-  prevTime: function() { changeTime(-1); },
-  nextTime: function() { changeTime(1); },
-  randomizeWind: function() {
-    // Move storm to new random position if active
-    if (settings.thunderstormActive) {
-      settings.thunderstormPosition = {
-        x: Math.random() * 16 - 8, // Random position between -8 and 8
-        z: Math.random() * 16 - 8
-      };
+// === CONSTANTS ===
+const CONSTANTS = {
+  GRID: {
+    SIZE: 10,
+    RANGE: 9,
+    SPACING: 2,
+    VERTICAL_SCALE: 2
+  },
+  FLIGHT_LEVELS: {
+    MIN: 50,
+    MAX: 500,
+    INCREMENT: 50,
+    COUNT: 10
+  },
+  COLORS: {
+    WIND_SPEED: {
+      CALM: 0x00AA00,
+      LIGHT: 0x66FF66,
+      MODERATE: 0xFFFF00,
+      STRONG: 0xFF8800,
+      VERY_STRONG: 0xFF0000
+    },
+    HURRICANE: {
+      EYE: 0x87CEEB,
+      EYEWALL: 0xFF00FF,
+      EYEWALL_INTENSE: 0x8B0000
+    },
+    ARROW: 0x00ddff,
+    BACKGROUND: {
+      DARK: 0x000000,
+      LIGHT: 0xffffff
     }
-    
-    // Move hurricane to new random position if active
-    if (settings.hurricaneActive) {
-      settings.hurricanePosition = {
-        x: Math.random() * 16 - 8, // Random position between -8 and 8
-        z: Math.random() * 16 - 8
-      };
-    }
-    
-    // Add random time offset to create new wind patterns
-    const randomHourOffset = Math.floor(Math.random() * 24);
-    const randomDayOffset = Math.floor(Math.random() * 30);
-    
-    // Temporarily adjust time to generate new patterns
-    const originalTime = { ...currentTime };
-    const originalDate = new Date(currentDate);
-    
-    currentTime.hour = (currentTime.hour + randomHourOffset) % 24;
-    currentDate.setDate(currentDate.getDate() + randomDayOffset);
-    
-    // Regenerate wind data with new random patterns
-    regenerateWindData();
-    
-    // Restore original time
-    currentTime = originalTime;
-    currentDate = originalDate;
-    updateDateTimeDisplay();
-    
-    // Update mini map if a flight level is selected
-    if (selectedFlightLevel !== null) {
-      setTimeout(() => {
-        updateMiniMap();
-      }, 50); // Small delay to ensure cubes are fully generated
-    }
+  },
+  HURRICANE: {
+    CATEGORY_WINDS: [0, 74, 96, 111, 131, 157],
+    EYE_BASE_RADIUS: 0.5,
+    EYE_RADIUS_SCALE: 0.2,
+    EYEWALL_OFFSET: 0.8,
+    SPIRAL_BASE_RADIUS: 8,
+    SPIRAL_RADIUS_SCALE: 2
+  },
+  WIND_SPEED: {
+    THRESHOLDS: [20, 35, 50, 65],
+    BASE_ALTITUDE_FACTOR: 2.5,
+    MIN: 5,
+    MAX: 100
+  },
+  ANIMATION: {
+    OSCILLATION_SPEED: 1.5,
+    OSCILLATION_AMPLITUDE: 0.03,
+    MINI_MAP_OSCILLATION: 2
+  },
+  MAP: {
+    TEXTURE_SIZE: 512,
+    GROUND_SIZE: 20
   }
 };
 
-// Regional configurations with geographic bounds
-const regions = {
-  'Northeast': {
-    bounds: [[39.0, -80.0], [45.0, -67.0]], // NY, NE, ME region
-    center: [42.0, -73.5],
-    zoom: 6,
-    windPattern: 'nor_easter' // Nor'easter and Atlantic influence
+// === STATE MANAGEMENT ===
+const AppState = {
+  // 3D Scene objects
+  scene: null,
+  camera: null,
+  renderer: null,
+  controls: null,
+  
+  // Wind visualization
+  windCubes: [],
+  windArrows: [],
+  groundPlane: null,
+  arrowGeometry: null,
+  arrowMaterial: null,
+  
+  // Interaction
+  raycaster: new THREE.Raycaster(),
+  mouse: new THREE.Vector2(),
+  isHovering: false,
+  selectedFlightLevel: null,
+  selectedCubes: [],
+  isDragging: false,
+  mouseDownPosition: { x: 0, y: 0 },
+  
+  // GUI and UI
+  gui: null,
+  tooltip: null,
+  
+  // Mini map
+  miniMap: {
+    scene: null,
+    camera: null,
+    renderer: null,
+    canvas: null,
+    container: null,
+    groundPlane: null,
+    cubes: [],
+    arrows: [],
+    isResizing: false,
+    resizeStartSize: { width: 0, height: 0 },
+    resizeStartMouse: { x: 0, y: 0 }
   },
-  'Southeast': {
-    bounds: [[25.0, -87.0], [35.0, -75.0]], // FL, GA, SC, NC region
-    center: [30.0, -81.0],
-    zoom: 6,
-    windPattern: 'gulf_stream' // Gulf Stream and tropical influence
-  },
-  'Midwest': {
-    bounds: [[40.0, -93.0], [49.0, -80.0]], // Great Lakes region
-    center: [44.5, -86.5],
-    zoom: 6,
-    windPattern: 'continental' // Continental and lake effect patterns
-  },
-  'Southwest': {
-    bounds: [[31.0, -118.0], [37.0, -103.0]], // Desert Southwest
-    center: [34.0, -110.5],
-    zoom: 6,
-    windPattern: 'desert' // Desert thermal and mountain wave patterns
-  },
-  'Northwest': {
-    bounds: [[42.0, -125.0], [49.0, -110.0]], // Pacific Northwest
-    center: [45.5, -117.5],
-    zoom: 6,
-    windPattern: 'pacific' // Pacific maritime influence
-  },
-  'Great Plains': {
-    bounds: [[36.0, -105.0], [49.0, -90.0]], // Central Plains
-    center: [42.5, -97.5],
-    zoom: 6,
-    windPattern: 'plains' // Prairie winds and storm systems
+  
+  // Leaflet map
+  leafletMap: null,
+  mapCanvas: null,
+  mapContext: null,
+  mapTexture: null,
+  
+  // Time controls
+  currentDate: new Date(),
+  currentTime: {
+    hour: new Date().getHours(),
+    minute: new Date().getMinutes()
   }
 };
 
-// Date and time control functions
-function formatDate(date) {
-  const options = { month: 'short', day: 'numeric', year: 'numeric' };
-  return date.toLocaleDateString('en-US', options);
-}
+// === CONFIGURATION ===
+const Config = {
+  regions: {
+    'Northeast': {
+      bounds: [[39.0, -80.0], [45.0, -67.0]],
+      center: [42.0, -73.5],
+      zoom: 6,
+      windPattern: 'nor_easter'
+    },
+    'Southeast': {
+      bounds: [[25.0, -87.0], [35.0, -75.0]],
+      center: [30.0, -81.0],
+      zoom: 6,
+      windPattern: 'gulf_stream'
+    },
+    'Midwest': {
+      bounds: [[40.0, -93.0], [49.0, -80.0]],
+      center: [44.5, -86.5],
+      zoom: 6,
+      windPattern: 'continental'
+    },
+    'Southwest': {
+      bounds: [[31.0, -118.0], [37.0, -103.0]],
+      center: [34.0, -110.5],
+      zoom: 6,
+      windPattern: 'desert'
+    },
+    'Northwest': {
+      bounds: [[42.0, -125.0], [49.0, -110.0]],
+      center: [45.5, -117.5],
+      zoom: 6,
+      windPattern: 'pacific'
+    },
+    'Great Plains': {
+      bounds: [[36.0, -105.0], [49.0, -90.0]],
+      center: [42.5, -97.5],
+      zoom: 6,
+      windPattern: 'plains'
+    }
+  },
 
-function formatTime(timeObj) {
-  const hour = timeObj.hour.toString().padStart(2, '0');
-  const minute = timeObj.minute.toString().padStart(2, '0');
-  return `${hour}:${minute}`;
-}
-
-function updateDateTimeDisplay() {
-  settings.currentDate = formatDate(currentDate);
-  settings.currentTime = formatTime(currentTime);
-  
-  // Update GUI display if available
-  if (gui) {
-    gui.updateDisplay();
+  settings: {
+    region: 'Southeast',
+    cubeOpacity: 0.03,
+    mapStyle: 'OpenStreetMap',
+    darkBackground: true,
+    showWindArrows: true,
+    currentDate: 'Oct 15, 2024',
+    currentTime: '14:00',
+    thunderstormActive: false,
+    thunderstormPosition: { x: 0, z: 0 },
+    hurricaneActive: false,
+    hurricanePosition: { x: 0, z: 0 },
+    hurricaneIntensity: 3
   }
-}
+};
 
-// Update background color
-function updateBackgroundColor(isDark) {
-  if (isDark) {
-    scene.background = new THREE.Color(0x000000); // Black background
-  } else {
-    scene.background = new THREE.Color(0xffffff); // White background
-  }
-}
+// === UTILITY FUNCTIONS ===
+const Utils = {
+  formatDate(date) {
+    const options = { month: 'short', day: 'numeric', year: 'numeric' };
+    return date.toLocaleDateString('en-US', options);
+  },
 
-// Toggle wind arrows visibility
-function toggleWindArrows(showArrows) {
-  if (showArrows) {
-    // Show arrows based on current selection/hover state
-    if (selectedFlightLevel !== null) {
-      // Show arrows for selected flight level
-      windArrows.forEach(arrow => {
-        arrow.visible = arrow.userData.yLevel === selectedFlightLevel;
-      });
-    } else {
-      // Hide all arrows if no selection
-      windArrows.forEach(arrow => {
-        arrow.visible = false;
-      });
-    }
-    
-    // Show mini map arrows if mini map is visible
-    if (selectedFlightLevel !== null) {
-      miniMapArrows.forEach(arrow => {
-        arrow.style.display = 'block';
-      });
-    }
-  } else {
-    // Hide all 3D arrows
-    windArrows.forEach(arrow => {
-      arrow.visible = false;
-    });
-    
-    // Hide all mini map arrows
-    miniMapArrows.forEach(arrow => {
-      arrow.style.display = 'none';
-    });
-  }
-}
+  formatTime(timeObj) {
+    const hour = timeObj.hour.toString().padStart(2, '0');
+    const minute = timeObj.minute.toString().padStart(2, '0');
+    return `${hour}:${minute}`;
+  },
 
-function changeDate(days) {
-  const newDate = new Date(currentDate);
-  newDate.setDate(newDate.getDate() + days);
-  currentDate = newDate;
-  updateDateTimeDisplay();
-  regenerateWindData(); // Update wind data when date changes
-  
-  // Update mini map if a flight level is selected
-  if (selectedFlightLevel !== null) {
-    updateMiniMap();
-  }
-}
-
-function changeTime(hours) {
-  currentTime.hour += hours;
-  
-  // Handle day rollover
-  if (currentTime.hour >= 24) {
-    currentTime.hour = 0;
-    changeDate(1);
-    return; // changeDate already calls updateDateTimeDisplay, regenerateWindData, and updateMiniMap
-  } else if (currentTime.hour < 0) {
-    currentTime.hour = 23;
-    changeDate(-1);
-    return; // changeDate already calls updateDateTimeDisplay, regenerateWindData, and updateMiniMap
-  }
-  
-  updateDateTimeDisplay();
-  regenerateWindData(); // Update wind data when time changes
-  
-  // Update mini map if a flight level is selected
-  if (selectedFlightLevel !== null) {
-    updateMiniMap();
-  }
-}
-
-
-
-// Initialize the scene
-function initScene() {
-  // Scene setup
-  scene = new THREE.Scene();
-  // Set initial background based on settings
-  updateBackgroundColor(settings.darkBackground); 
-
-  // Get canvas and set up responsive sizing
-  const canvas = document.getElementById('three-canvas');
-  const rect = canvas.getBoundingClientRect();
-  
-  // Camera setup
-  camera = new THREE.PerspectiveCamera(75, rect.width / rect.height, 0.1, 1000);
-  camera.position.set(15, 20, 15);
-  
-  // Renderer setup
-  renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
-  renderer.setSize(rect.width, rect.height);
-  renderer.setPixelRatio(window.devicePixelRatio);
-
-  // Basic lighting
-  const ambientLight = new THREE.AmbientLight(0xffffff, 1.0); // Bright white ambient light
-  scene.add(ambientLight);
-  
-  // Controls
-  controls = new THREE.OrbitControls(camera, renderer.domElement);
-  controls.enableDamping = true;
-  controls.dampingFactor = 0.05;
-  controls.enablePan = false; // Disable panning
-
-  // Raycaster for interactions
-  raycaster = new THREE.Raycaster();
-  mouse = new THREE.Vector2();
-
-  // Create ground plane
-  createGroundPlane();
-  
-  // Create arrow geometry and material
-  createArrowGeometry();
-  
-  // Generate wind cubes
-  generateWindCubes();
-  
-  // Create flight level labels
-  createFlightLevelLabels();
-  
-  // Create GUI
-  createGUI();
-  
-  // Initialize date and time display
-  updateDateTimeDisplay();
-  
-  // Create tooltip
-  createTooltip();
-  
-  // Initialize mini map
-  initMiniMap();
-  
-  // Add event listeners
-  canvas.addEventListener('mousemove', onMouseMove);
-  canvas.addEventListener('mousedown', onMouseDown);
-  canvas.addEventListener('mouseup', onMouseUp);
-  canvas.addEventListener('click', onMouseClick);
-  
-  // Add touch event listeners for mobile support
-  canvas.addEventListener('touchstart', onTouchStart, { passive: false });
-  canvas.addEventListener('touchmove', onTouchMove, { passive: false });
-  canvas.addEventListener('touchend', onTouchEnd, { passive: false });
-  
-  // Add mini map resize event listeners
-  const resizeHandle = document.getElementById('mini-map-resize-handle');
-  resizeHandle.addEventListener('mousedown', onMiniMapResizeStart);
-  resizeHandle.addEventListener('touchstart', onMiniMapResizeStart, { passive: false });
-  
-  window.addEventListener('resize', onWindowResize);
-  
-  // Add failsafe to reset resize state if user switches away
-  window.addEventListener('blur', function() {
-    if (isResizing) {
-      onMiniMapResizeEnd();
-    }
-  });
-}
-
-// Create dat.GUI interface
-function createGUI() {
-  gui = new dat.GUI();
-  
-  // Increase GUI width to accommodate longer labels
-  gui.width = 300;
-  
-  // Region selector
-  gui.add(settings, 'region', Object.keys(regions)).name('US Region').onChange(function(value) {
-    updateRegion(value);
-  });
-  
-  // Map style selector
-  gui.add(settings, 'mapStyle', ['OpenStreetMap', 'Satellite', 'Terrain']).name('Map Style').onChange(function(value) {
-    updateMapStyle(value);
-  });
-  
-  // Create Options folder
-  const optionsFolder = gui.addFolder('Options');
-  
-  // Background color toggle
-  optionsFolder.add(settings, 'darkBackground').name('Dark Background').onChange(function(value) {
-    updateBackgroundColor(value);
-  });
-  
-  // Wind arrows toggle
-  optionsFolder.add(settings, 'showWindArrows').name('Wind Arrows').onChange(function(value) {
-    toggleWindArrows(value);
-  });
-  
-  // Opacity control
-  optionsFolder.add(settings, 'cubeOpacity', 0.01, 0.3).name('Cube Opacity').onChange(function(value) {
-    updateCubeOpacity();
-  });
-  
-  optionsFolder.open(); // Start with options folder open
-  
-  // Create Simulations folder
-  const simulationsFolder = gui.addFolder('Simulations');
-  
-  // Add thunderstorm toggle to Simulations folder
-  simulationsFolder.add(settings, 'thunderstormActive').name('Thunderstorm').onChange(function(value) {
-    // Move storm to random position when activated
-    if (value) {
-      settings.thunderstormPosition = {
-        x: Math.random() * 16 - 8, // Random position between -8 and 8
-        z: Math.random() * 16 - 8
-      };
-    }
-    regenerateWindData();
-    if (selectedFlightLevel !== null) {
-      updateMiniMap();
-    }
-  });
-  
-  // Add hurricane toggle to Simulations folder
-  simulationsFolder.add(settings, 'hurricaneActive').name('Hurricane').onChange(function(value) {
-    // Move hurricane to random position when activated
-    if (value) {
-      settings.hurricanePosition = {
-        x: Math.random() * 16 - 8, // Random position between -8 and 8
-        z: Math.random() * 16 - 8
-      };
-    }
-    regenerateWindData();
-    if (selectedFlightLevel !== null) {
-      updateMiniMap();
-    }
-  });
-  
-  // Add hurricane intensity control (only shows when hurricane is active)
-  const hurricaneIntensityController = simulationsFolder.add(settings, 'hurricaneIntensity', 1, 5, 1).name('Hurricane Category');
-  hurricaneIntensityController.onChange(function(value) {
-    if (settings.hurricaneActive) {
-      regenerateWindData();
-      if (selectedFlightLevel !== null) {
-        updateMiniMap();
+  getWindSpeedColor(speed, stormType = null, distanceFromCenter = Infinity, isStormCore = false) {
+    if (stormType === 'hurricane') {
+      const { EYE_BASE_RADIUS, EYE_RADIUS_SCALE, EYEWALL_OFFSET, SPIRAL_BASE_RADIUS, SPIRAL_RADIUS_SCALE } = CONSTANTS.HURRICANE;
+      const eyeRadius = EYE_BASE_RADIUS + (Config.settings.hurricaneIntensity * EYE_RADIUS_SCALE);
+      const eyeWallRadius = eyeRadius + EYEWALL_OFFSET;
+      const spiralRadius = SPIRAL_BASE_RADIUS + (Config.settings.hurricaneIntensity * SPIRAL_RADIUS_SCALE);
+      
+      if (distanceFromCenter < eyeRadius) {
+        return new THREE.Color(CONSTANTS.COLORS.HURRICANE.EYE);
+      } else if (distanceFromCenter < eyeWallRadius) {
+        const intensity = 1 - ((distanceFromCenter - eyeRadius) / (eyeWallRadius - eyeRadius));
+        const color = new THREE.Color(CONSTANTS.COLORS.HURRICANE.EYEWALL)
+          .lerp(new THREE.Color(CONSTANTS.COLORS.HURRICANE.EYEWALL_INTENSE), intensity);
+        const pulseIntensity = (Math.sin(Date.now() * 0.003) + 1) * 0.5;
+        return color.multiplyScalar(0.8 + pulseIntensity * 0.2);
+      } else if (distanceFromCenter < spiralRadius) {
+        const bandIntensity = 1 - ((distanceFromCenter - eyeWallRadius) / (spiralRadius - eyeWallRadius));
+        if (speed > 60) return new THREE.Color(0xFF0000).lerp(new THREE.Color(0xFF8800), 1 - bandIntensity);
+        if (speed > 40) return new THREE.Color(0xFF8800).lerp(new THREE.Color(0xFFFF00), 1 - bandIntensity);
+        return new THREE.Color(0xFFFF00).lerp(new THREE.Color(0x66FF66), 1 - bandIntensity);
       }
     }
-  });
-  
-  simulationsFolder.open(); // Start with simulations folder open
-  
-  // Date and time controls folder
-  const timeFolder = gui.addFolder('Date & Time');
-  
-  // Create date controller
-  const dateController = timeFolder.add(settings, 'currentDate').name('Date').listen();
-  const dateRow = dateController.domElement.parentElement.parentElement;
-  dateRow.style.display = 'flex';
-  dateRow.style.alignItems = 'center';
-  dateRow.style.gap = '8px';
-  
-  // Get the label element and ensure it's first
-  const dateLabel = dateRow.querySelector('.property-name');
-  dateRow.insertBefore(dateLabel, dateRow.firstChild);
-  
-  // Create date buttons container
-  const dateButtons = document.createElement('div');
-  dateButtons.style.display = 'flex';
-  dateButtons.style.gap = '4px';
-  
-  // Create and add prev/next date buttons
-  const prevDateBtn = document.createElement('button');
-  prevDateBtn.className = 'nav-button';
-  prevDateBtn.textContent = '←';
-  prevDateBtn.onclick = () => settings.prevDate();
-  
-  const nextDateBtn = document.createElement('button');
-  nextDateBtn.className = 'nav-button';
-  nextDateBtn.textContent = '→';
-  nextDateBtn.onclick = () => settings.nextDate();
-  
-  dateButtons.appendChild(prevDateBtn);
-  dateButtons.appendChild(nextDateBtn);
-  dateRow.appendChild(dateButtons);
-  
-  // Make date input read-only and center text
-  const dateInput = dateController.domElement.querySelector('input');
-  dateInput.readOnly = true;
-  dateInput.style.textAlign = 'center';
-  dateInput.style.width = '100%';
-  
-  // Ensure date input container has proper width
-  const dateInputContainer = dateInput.parentElement;
-  dateInputContainer.style.width = '120px'; // Set fixed width for date input
-  
-  // Create time controller
-  const timeController = timeFolder.add(settings, 'currentTime').name('Time').listen();
-  const timeRow = timeController.domElement.parentElement.parentElement;
-  timeRow.style.display = 'flex';
-  timeRow.style.alignItems = 'center';
-  timeRow.style.gap = '8px';
-  
-  // Get the label element and ensure it's first (same as date)
-  const timeLabel = timeRow.querySelector('.property-name');
-  timeRow.insertBefore(timeLabel, timeRow.firstChild);
-  
-  // Create time buttons container
-  const timeButtons = document.createElement('div');
-  timeButtons.style.display = 'flex';
-  timeButtons.style.gap = '4px';
-  
-  // Create and add prev/next time buttons
-  const prevTimeBtn = document.createElement('button');
-  prevTimeBtn.className = 'nav-button';
-  prevTimeBtn.textContent = '←';
-  prevTimeBtn.onclick = () => settings.prevTime();
-  
-  const nextTimeBtn = document.createElement('button');
-  nextTimeBtn.className = 'nav-button';
-  nextTimeBtn.textContent = '→';
-  nextTimeBtn.onclick = () => settings.nextTime();
-  
-  timeButtons.appendChild(prevTimeBtn);
-  timeButtons.appendChild(nextTimeBtn);
-  timeRow.appendChild(timeButtons);
-  
-  // Make time input read-only and center text
-  const timeInput = timeController.domElement.querySelector('input');
-  timeInput.readOnly = true;
-  timeInput.style.textAlign = 'center';
-  timeInput.style.width = '100%';
-  
-  // Ensure time input container has same width as date
-  const timeInputContainer = timeInput.parentElement;
-  timeInputContainer.style.width = '120px'; // Match date input width
-  
-  timeFolder.open(); // Start with time folder open
-  
-  // Wind randomization button
-  gui.add(settings, 'randomizeWind').name('Randomize Wind');
-}
-
-// Initialize Leaflet map
-function initLeafletMap() {
-  // Initialize Leaflet map (canvas already created in createGroundPlane)
-  const mapDiv = document.getElementById('leaflet-map');
-  leafletMap = L.map(mapDiv, {
-    zoomControl: false,
-    attributionControl: false,
-    dragging: false,
-    touchZoom: false,
-    scrollWheelZoom: false,
-    doubleClickZoom: false,
-    boxZoom: false
-  });
-  
-  // Add OpenStreetMap tiles
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 19
-  }).addTo(leafletMap);
-  
-  // Set initial region and load texture
-  updateLeafletRegion(settings.region);
-}
-
-// Update Leaflet map to show different region
-function updateLeafletRegion(regionName) {
-  const region = regions[regionName];
-  leafletMap.setView(region.center, region.zoom);
-  
-  // Immediately capture texture (no need to wait for hidden map)
-  captureMapToTexture();
-}
-
-// Update map style
-function updateMapStyle(styleName) {
-  // Remove existing tile layers
-  leafletMap.eachLayer(function(layer) {
-    if (layer instanceof L.TileLayer) {
-      leafletMap.removeLayer(layer);
+    
+    if (stormType === 'thunderstorm' && isStormCore) {
+      const color = new THREE.Color(CONSTANTS.COLORS.WIND_SPEED.VERY_STRONG);
+      const pulseIntensity = (Math.sin(Date.now() * 0.002) + 1) * 0.5;
+      return color.multiplyScalar(0.7 + pulseIntensity * 0.3);
     }
-  });
-  
-  // Add new tile layer based on style
-  let tileLayer;
-  switch(styleName) {
-    case 'OpenStreetMap':
-      tileLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png');
-      break;
-    case 'Satellite':
-      tileLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}');
-      break;
-    case 'Terrain':
-      tileLayer = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png');
-      break;
-    default:
-      tileLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png');
+    
+    if (stormType === 'thunderstorm' && distanceFromCenter < 5) {
+      const intensity = Math.max(0.5, 1 - (distanceFromCenter / 5));
+      return new THREE.Color(CONSTANTS.COLORS.WIND_SPEED.STRONG)
+        .lerp(new THREE.Color(CONSTANTS.COLORS.WIND_SPEED.VERY_STRONG), intensity);
+    }
+    
+    const { THRESHOLDS } = CONSTANTS.WIND_SPEED;
+    const { WIND_SPEED: COLORS } = CONSTANTS.COLORS;
+    
+    if (speed < THRESHOLDS[0]) return COLORS.CALM;
+    if (speed < THRESHOLDS[1]) return COLORS.LIGHT;
+    if (speed < THRESHOLDS[2]) return COLORS.MODERATE;
+    if (speed < THRESHOLDS[3]) return COLORS.STRONG;
+    return COLORS.VERY_STRONG;
+  },
+
+  normalizeGridPosition(worldPos) {
+    return (worldPos + CONSTANTS.GRID.RANGE + 1) / (2 * CONSTANTS.GRID.RANGE + 2);
+  },
+
+  calculateDistance(pos1, pos2) {
+    const dx = pos1.x - pos2.x;
+    const dz = pos1.z - pos2.z;
+    return Math.sqrt(dx * dx + dz * dz);
+  },
+
+  getRandomPosition() {
+    return {
+      x: Math.random() * 16 - 8,
+      z: Math.random() * 16 - 8
+    };
   }
-  
-  tileLayer.addTo(leafletMap);
-  
-  // Update texture after style change
-  captureMapToTexture();
-}
+};
 
-// Capture Leaflet map to canvas and create Three.js texture
-function captureMapToTexture() {
-  const region = regions[settings.region];
-  const zoom = region.zoom;
-  const center = region.center;
-  
-  // Calculate tile coordinates for the current region
-  const lat = center[0];
-  const lng = center[1];
-  
-  // Convert lat/lng to tile coordinates
-  const x = Math.floor((lng + 180) / 360 * Math.pow(2, zoom));
-  const y = Math.floor((1 - Math.log(Math.tan(lat * Math.PI / 180) + 1 / Math.cos(lat * Math.PI / 180)) / Math.PI) / 2 * Math.pow(2, zoom));
-  
-  // Get current map style
-  let tileUrl;
-  switch(settings.mapStyle) {
-    case 'OpenStreetMap':
-      tileUrl = `https://tile.openstreetmap.org/${zoom}/${x}/${y}.png`;
-      break;
-    case 'Satellite':
-      tileUrl = `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${zoom}/${y}/${x}`;
-      break;
-    case 'Terrain':
-      tileUrl = `https://tile.opentopomap.org/${zoom}/${x}/${y}.png`;
-      break;
-    default:
-      tileUrl = `https://tile.openstreetmap.org/${zoom}/${x}/${y}.png`;
-  }
-  
-  // Load the tile image
-  const img = new Image();
-  img.crossOrigin = 'anonymous';
-  
-  img.onload = function() {
-    // Clear canvas
-    mapContext.clearRect(0, 0, 512, 512);
+// === WIND CALCULATION MODULES ===
+const WindCalculator = {
+  generateDirection(x, y, z, windPattern) {
+    const flightLevel = CONSTANTS.FLIGHT_LEVELS.MIN + ((y / CONSTANTS.GRID.SPACING) * CONSTANTS.FLIGHT_LEVELS.INCREMENT);
+    let directionAngle = 0;
     
-    // Draw the tile image
-    mapContext.drawImage(img, 0, 0, 512, 512);
-    
-    // Add region name overlay
-    mapContext.fillStyle = 'rgba(0, 0, 0, 0.7)';
-    mapContext.fillRect(10, 10, 150, 30);
-    mapContext.fillStyle = 'white';
-    mapContext.font = '16px Arial';
-    mapContext.fillText(settings.region, 20, 30);
-    
-    // Create or update Three.js texture
-    if (mapTexture) {
-      mapTexture.needsUpdate = true;
-    } else {
-      mapTexture = new THREE.CanvasTexture(mapCanvas);
+    // Hurricane effects (highest priority)
+    if (Config.settings.hurricaneActive) {
+      directionAngle += this.calculateHurricaneEffect(x, y, z);
+    } 
+    // Thunderstorm effects
+    else if (Config.settings.thunderstormActive) {
+      directionAngle += this.calculateThunderstormEffect(x, y, z);
     }
     
-    // Update ground plane material
-    if (groundPlane) {
-      groundPlane.material.map = mapTexture;
-      groundPlane.material.needsUpdate = true;
-    }
+    // Altitude-based patterns
+    directionAngle += this.getAltitudeWindPattern(flightLevel, x, z);
     
-    // Update mini map ground plane too
-    updateMiniMapGroundPlane();
-  };
-  
-  img.onerror = function() {
-    console.log('Failed to load tile, using fallback');
-    // Create a fallback pattern if tile fails to load
-    mapContext.fillStyle = '#4a7c59';
-    mapContext.fillRect(0, 0, 512, 512);
+    // Regional patterns
+    directionAngle += this.getRegionalWindPattern(windPattern, x, y, z);
     
-    // Add a simple grid pattern
-    mapContext.strokeStyle = '#3a5a2a';
-    mapContext.lineWidth = 1;
-    for (let i = 0; i < 512; i += 64) {
-      mapContext.beginPath();
-      mapContext.moveTo(i, 0);
-      mapContext.lineTo(i, 512);
-      mapContext.stroke();
-      mapContext.beginPath();
-      mapContext.moveTo(0, i);
-      mapContext.lineTo(512, i);
-      mapContext.stroke();
-    }
+    // Time-based variations
+    directionAngle += this.getTimeBasedVariation(x, y, z);
     
-    // Add region name
-    mapContext.fillStyle = 'rgba(0, 0, 0, 0.7)';
-    mapContext.fillRect(10, 10, 150, 30);
-    mapContext.fillStyle = 'white';
-    mapContext.font = '16px Arial';
-    mapContext.fillText(settings.region, 20, 30);
-    
-    // Create texture even with fallback
-    if (mapTexture) {
-      mapTexture.needsUpdate = true;
-    } else {
-      mapTexture = new THREE.CanvasTexture(mapCanvas);
-    }
-    
-    if (groundPlane) {
-      groundPlane.material.map = mapTexture;
-      groundPlane.material.needsUpdate = true;
-    }
-    
-    updateMiniMapGroundPlane();
-  };
-  
-  // Start loading the image
-  img.src = tileUrl;
-}
+    const angleRad = (directionAngle * Math.PI) / 180;
+    return new THREE.Vector3(
+      Math.cos(angleRad),
+      0,
+      Math.sin(angleRad)
+    ).normalize();
+  },
 
-// Update region and regenerate data
-function updateRegion(regionName) {
-  settings.region = regionName;
-  updateLeafletRegion(regionName);
-  regenerateWindData();
-  updateMiniMap(); // Update mini map when region changes
-  updateMiniMapGroundPlane(); // Update mini map ground plane when region changes
-}
-
-// Regenerate wind data with current city pattern
-function regenerateWindData() {
-  // Clear existing cubes
-  windCubes.forEach(cube => {
-    scene.remove(cube);
-  });
-  windCubes = [];
-  
-  // Clear existing arrows
-  windArrows.forEach(arrow => {
-    scene.remove(arrow);
-  });
-  windArrows = [];
-  
-  // Generate new cubes and arrows
-  generateWindCubes();
-  
-  // Restore selected flight level opacity if one is selected
-  if (selectedFlightLevel !== null) {
-    windCubes.forEach(cube => {
-      if (cube.userData.yLevel === selectedFlightLevel) {
-        // Highlight selected level
-        cube.material.opacity = 0.5;
-      } else {
-        // Use GUI setting for dimmed levels
-        cube.material.opacity = settings.cubeOpacity;
-      }
-    });
+  calculateHurricaneEffect(x, y, z) {
+    const dx = x - Config.settings.hurricanePosition.x;
+    const dz = z - Config.settings.hurricanePosition.z;
+    const distanceFromCenter = Utils.calculateDistance({ x, z }, Config.settings.hurricanePosition);
     
-    // Show arrows for selected level if enabled
-    windArrows.forEach(arrow => {
-      arrow.visible = settings.showWindArrows && arrow.userData.yLevel === selectedFlightLevel;
-    });
-  }
-}
-
-// Create reusable arrow geometry and material
-function createArrowGeometry() {
-  // Create streamlined arrow shape for wind flow visualization
-  const shaftGeometry = new THREE.CylinderGeometry(0.03, 0.06, 1.0, 8); // Tapered shaft
-  const headGeometry = new THREE.ConeGeometry(0.12, 0.3, 8); // Smaller, more streamlined head
-  
-  // Create arrow geometry by merging shaft and head
-  arrowGeometry = new THREE.BufferGeometry();
-  
-  // Create matrices for positioning
-  const shaftMatrix = new THREE.Matrix4();
-  const headMatrix = new THREE.Matrix4();
-  headMatrix.setPosition(0, 0.65, 0); // Position head at end of shaft
-  
-  // Merge geometries
-  const shaftGeo = shaftGeometry.clone().applyMatrix4(shaftMatrix);
-  const headGeo = headGeometry.clone().applyMatrix4(headMatrix);
-  
-  arrowGeometry = THREE.BufferGeometryUtils.mergeBufferGeometries([shaftGeo, headGeo]);
-  
-  // Create material - bright cyan with slight transparency for flowing effect
-  arrowMaterial = new THREE.MeshLambertMaterial({
-    color: 0x00ddff,
-    transparent: true,
-    opacity: 0.85
-  });
-}
-
-// Generate realistic wind direction based on position and regional patterns
-function generateWindDirection(x, y, z, windPattern) {
-  // Flight level determines base wind characteristics
-  const flightLevel = 50 + ((y / 2) * 50); // FL050 to FL500
-  
-  // Start with eastward direction, but vary significantly by altitude
-  let directionAngle = 0; // Degrees from east (0° = due east)
-  
-  // Add hurricane rotation if active (takes precedence over thunderstorm)
-  if (settings.hurricaneActive) {
-    const dx = x - settings.hurricanePosition.x;
-    const dz = z - settings.hurricanePosition.z;
-    const distanceFromCenter = Math.sqrt(dx * dx + dz * dz);
-    
-    // Hurricane structure parameters based on category
-    const eyeRadius = 0.5 + (settings.hurricaneIntensity * 0.2); // Eye: 0.7-1.5 units
-    const eyeWallRadius = eyeRadius + 0.8; // Eye wall: ~1.5-2.3 units
-    const spiralRadius = 8 + (settings.hurricaneIntensity * 2); // Outer bands: 10-18 units
+    const { EYE_BASE_RADIUS, EYE_RADIUS_SCALE, EYEWALL_OFFSET, SPIRAL_BASE_RADIUS, SPIRAL_RADIUS_SCALE } = CONSTANTS.HURRICANE;
+    const eyeRadius = EYE_BASE_RADIUS + (Config.settings.hurricaneIntensity * EYE_RADIUS_SCALE);
+    const eyeWallRadius = eyeRadius + EYEWALL_OFFSET;
+    const spiralRadius = SPIRAL_BASE_RADIUS + (Config.settings.hurricaneIntensity * SPIRAL_RADIUS_SCALE);
     
     if (distanceFromCenter < eyeRadius) {
-      // Eye of the hurricane - calm winds
-      directionAngle += Math.random() * 60 - 30; // Light, variable winds
-      return new THREE.Vector3(
-        Math.cos(directionAngle * Math.PI / 180) * 0.1, // Very light winds
-        0,
-        Math.sin(directionAngle * Math.PI / 180) * 0.1
-      ).normalize();
+      return Math.random() * 60 - 30; // Light, variable winds in eye
     } else if (distanceFromCenter < eyeWallRadius) {
-      // Eye wall - strongest winds, tight circulation
       const hurricaneAngle = Math.atan2(dz, dx) * 180 / Math.PI;
-      // Counterclockwise rotation (Northern Hemisphere)
       const rotationAngle = hurricaneAngle + 90; // Tangential flow
-      
-      // Add inward spiral component
-      const spiralAngle = rotationAngle - 15; // 15° inward spiral
-      
-      // Add altitude-based variations (stronger at mid-levels)
+      const spiralAngle = rotationAngle - 15; // Inward spiral
       const altitudeEffect = Math.sin((y / 10) * Math.PI) * 10;
-      
-      directionAngle = spiralAngle + altitudeEffect;
+      return spiralAngle + altitudeEffect;
     } else if (distanceFromCenter < spiralRadius) {
-      // Spiral bands - decreasing intensity with distance
       const hurricaneAngle = Math.atan2(dz, dx) * 180 / Math.PI;
-      // Counterclockwise rotation with increasing spiral angle
       const spiralIntensity = 1 - ((distanceFromCenter - eyeWallRadius) / (spiralRadius - eyeWallRadius));
-      const spiralAngle = hurricaneAngle + 90 - (30 * spiralIntensity); // More inward spiral farther out
-      
-      // Add spiral band variations
+      const spiralAngle = hurricaneAngle + 90 - (30 * spiralIntensity);
       const bandEffect = Math.sin(distanceFromCenter * 2 + hurricaneAngle * 0.1) * 15;
-      
-      // Add vertical shear effects at higher altitudes
-      const shearEffect = (y > 6) ? (y - 6) * 5 : 0; // Westerly shear aloft
-      
-      directionAngle = spiralAngle + bandEffect + shearEffect;
+      const shearEffect = (y > 6) ? (y - 6) * 5 : 0;
+      return spiralAngle + bandEffect + shearEffect;
     } else {
-      // Outside hurricane influence - normal pattern with outflow aloft
       if (y > 8) {
-        // Upper-level outflow (anticyclonic)
         const hurricaneAngle = Math.atan2(dz, dx) * 180 / Math.PI;
-        const outflowAngle = hurricaneAngle - 90; // Clockwise outflow
+        const outflowAngle = hurricaneAngle - 90;
         const outflowIntensity = Math.exp(-(distanceFromCenter - spiralRadius) / 3);
-        directionAngle += outflowAngle * outflowIntensity * 0.3;
+        return outflowAngle * outflowIntensity * 0.3;
       }
     }
-  } else if (settings.thunderstormActive) {
-    const dx = x - settings.thunderstormPosition.x;
-    const dz = z - settings.thunderstormPosition.z;
-    const distanceFromStorm = Math.sqrt(dx * dx + dz * dz);
+    return 0;
+  },
+
+  calculateThunderstormEffect(x, y, z) {
+    const dx = x - Config.settings.thunderstormPosition.x;
+    const dz = z - Config.settings.thunderstormPosition.z;
+    const distanceFromStorm = Utils.calculateDistance({ x, z }, Config.settings.thunderstormPosition);
     
-    // Create rotating wind pattern around storm (cyclonic rotation)
     const stormAngle = Math.atan2(dz, dx) * 180 / Math.PI;
-    const rotationStrength = Math.exp(-distanceFromStorm / 3) * 180; // Stronger rotation near core
-    
-    // Add vertical wind component near storm core (updrafts/downdrafts)
+    const rotationStrength = Math.exp(-distanceFromStorm / 3) * 180;
     const verticalComponent = Math.sin((y / 10) * Math.PI) * 45;
+    const turbulence = (Math.sin(x * 3 + y * 2 + z * 2.5) + Math.cos(x * 2 + y * 2.5 + z * 2)) * 30;
     
-    // Add chaotic variations in storm
-    const turbulence = (Math.sin(x * 3 + y * 2 + z * 2.5) + 
-                       Math.cos(x * 2 + y * 2.5 + z * 2)) * 30;
+    let effect = stormAngle + rotationStrength + verticalComponent + turbulence;
     
-    directionAngle += stormAngle + rotationStrength + verticalComponent + turbulence;
-    
-    // More chaotic near storm core
     if (distanceFromStorm < 3) {
-      directionAngle += Math.random() * 60 - 30; // Random ±30° variation
+      effect += Math.random() * 60 - 30;
     }
-  }
-  
-  // Altitude-based wind pattern changes (major variations between flight levels)
-  const altitudeLayerEffect = getAltitudeWindPattern(flightLevel, x, z);
-  directionAngle += altitudeLayerEffect;
-  
-  // Add regional wind pattern influences (smaller variations)
-  switch(windPattern) {
-    case 'nor_easter':
-      // Northeast: More varied at different altitudes
-      directionAngle += (z * 2) + Math.sin(y * 0.8) * 15;
-      break;
-    case 'gulf_stream':
-      // Southeast: Gulf Stream influence varies with altitude
-      directionAngle += (x * 1.2) + Math.cos(y * 0.6) * 12;
-      break;
-    case 'continental':
-      // Midwest: Continental flow patterns shift with altitude
-      directionAngle += (x + z) * 0.8 + Math.sin(y * 0.5) * 18;
-      break;
-    case 'desert':
-      // Southwest: Thermal patterns stronger at lower altitudes
-      const thermalEffect = Math.max(0, 1 - (y / 10)); // Stronger at lower altitudes
-      directionAngle += Math.sin(x * 0.4) * 10 * thermalEffect + Math.cos(y * 0.7) * 20;
-      break;
-    case 'pacific':
-      // Northwest: Jet stream effects at higher altitudes
-      const jetStreamEffect = Math.min(1, y / 8); // Stronger at higher altitudes
-      directionAngle += 25 * jetStreamEffect + (z * 1.5) + Math.sin(y * 0.4) * 25;
-      break;
-    case 'plains':
-      // Great Plains: Storm system influences vary with height
-      directionAngle += (x - z) * 1.2 + Math.cos(y * 0.6) * 16;
-      break;
-  }
-  
-  // Add time-based variations that interact with altitude
-  const timeSeed = currentDate.getTime() + currentTime.hour;
-  const timeAltitudeInteraction = Math.sin(timeSeed + x * 30 + y * 40 + z * 35) * (5 + y * 2);
-  directionAngle += timeAltitudeInteraction;
-  
-  // Convert angle to radians and create direction vector
-  const angleRad = (directionAngle * Math.PI) / 180;
-  const direction = new THREE.Vector3(
-    Math.cos(angleRad), // X component (east-west)
-    0, // Keep horizontal 
-    Math.sin(angleRad) // Z component (north-south)
-  ).normalize();
-  
-  return direction;
-}
+    
+    return effect;
+  },
 
-// Generate altitude-specific wind layer patterns
-function getAltitudeWindPattern(flightLevel, x, z) {
-  let layerEffect = 0;
-  
-  if (flightLevel <= 100) {
-    // Low altitude (FL050-FL100): Surface effects, more variable
-    layerEffect = Math.sin((x + z) * 0.6) * 25 + Math.cos(x * 0.8) * 15;
-  } else if (flightLevel <= 200) {
-    // Mid-low altitude (FL150-FL200): Transition layer
-    layerEffect = Math.sin((x - z) * 0.4) * 20 + Math.cos(z * 0.7) * 18;
-  } else if (flightLevel <= 300) {
-    // Mid altitude (FL250-FL300): More organized flow
-    layerEffect = Math.cos((x + z) * 0.3) * 15 + Math.sin(x * 0.5) * 12;
-  } else if (flightLevel <= 400) {
-    // High altitude (FL350-FL400): Jet stream influence
-    layerEffect = 30 + Math.sin(z * 0.2) * 10 + Math.cos(x * 0.3) * 8; // More westerly
-  } else {
-    // Very high altitude (FL450-FL500): Strong jet stream
-    layerEffect = 45 + Math.cos((x - z) * 0.2) * 12 + Math.sin(x * 0.25) * 6; // Very westerly
-  }
-  
-  return layerEffect;
-}
-
-// Create ground plane with Leaflet map texture
-function createGroundPlane() {
-  const geometry = new THREE.PlaneGeometry(20, 20);
-  
-  // Create initial texture canvas
-  mapCanvas = document.createElement('canvas');
-  mapCanvas.width = 512;
-  mapCanvas.height = 512;
-  mapContext = mapCanvas.getContext('2d');
-  
-  // Fill with initial pattern
-  mapContext.fillStyle = '#4a7c59';
-  mapContext.fillRect(0, 0, 512, 512);
-  
-  // Create initial texture
-  mapTexture = new THREE.CanvasTexture(mapCanvas);
-  
-  // Create material with texture
-  const material = new THREE.MeshLambertMaterial({ map: mapTexture });
-  groundPlane = new THREE.Mesh(geometry, material);
-  groundPlane.rotation.x = -Math.PI / 2;
-  groundPlane.position.y = -1;
-  scene.add(groundPlane);
-  
-  // Initialize Leaflet map and load real texture
-  initLeafletMap();
-}
-
-// Generate 10x10x10 wind cube grid with region-specific patterns (10 flight levels)
-function generateWindCubes() {
-  const windPattern = regions[settings.region].windPattern;
-  
-  for (let x = -9; x <= 9; x += 2) { // Centered grid from -9 to 9
-    for (let y = 0; y < 10; y++) { // 10 flight levels
-      for (let z = -9; z <= 9; z += 2) { // Centered grid from -9 to 9
-        // Map y levels to standard flight levels FL050-FL500 in increments of 50
-        const flightLevel = 50 + (y * 50); // FL050, FL100, FL150, ... FL500
-        
-        // Generate wind speed based on regional pattern
-        let speed = getWindSpeedForPattern(windPattern, x, y * 2, z); // Scale y for pattern
-        
-        createWindCube(x, y * 2, z, Math.round(speed), flightLevel); // Space cubes 2 units apart vertically
-      }
+  getAltitudeWindPattern(flightLevel, x, z) {
+    if (flightLevel <= 100) {
+      return Math.sin((x + z) * 0.6) * 25 + Math.cos(x * 0.8) * 15;
+    } else if (flightLevel <= 200) {
+      return Math.sin((x - z) * 0.4) * 20 + Math.cos(z * 0.7) * 18;
+    } else if (flightLevel <= 300) {
+      return Math.cos((x + z) * 0.3) * 15 + Math.sin(x * 0.5) * 12;
+    } else if (flightLevel <= 400) {
+      return 30 + Math.sin(z * 0.2) * 10 + Math.cos(x * 0.3) * 8;
+    } else {
+      return 45 + Math.cos((x - z) * 0.2) * 12 + Math.sin(x * 0.25) * 6;
     }
-  }
-}
+  },
 
-// Get wind speed based on region-specific patterns
-function getWindSpeedForPattern(pattern, x, y, z) {
-  const baseSpeed = 10 + (y * 2.5); // Speed increases with altitude
-  let speed = baseSpeed;
-  
-  // Add time-based variation (hour of day affects wind patterns)
-  const hourFactor = Math.sin((currentTime.hour / 24) * 2 * Math.PI) * 5;
-  
-  // Add date-based variation (day of year affects seasonal patterns)
-  const dayOfYear = Math.floor((currentDate - new Date(currentDate.getFullYear(), 0, 0)) / 1000 / 60 / 60 / 24);
-  const seasonalFactor = Math.cos((dayOfYear / 365) * 2 * Math.PI) * 8;
-  
-  // Create a pseudo-random seed based on date and time for consistent patterns
-  const timeSeed = currentDate.getTime() + currentTime.hour;
-  const seededRandom = (Math.sin(timeSeed + x * 1000 + y * 100 + z * 10) + 1) / 2;
-
-  // Add additional randomization factor
-  const randomFactor = Math.sin(timeSeed * 0.001 + x * 0.3 + y * 0.5 + z * 0.7) * 15;
-  speed += randomFactor;
-
-  // Add hurricane effects if active (takes precedence over thunderstorm)
-  if (settings.hurricaneActive) {
-    // Calculate distance from hurricane center
-    const dx = x - settings.hurricanePosition.x;
-    const dz = z - settings.hurricanePosition.z;
-    const distanceFromCenter = Math.sqrt(dx * dx + dz * dz);
+  getRegionalWindPattern(pattern, x, y, z) {
+    const timeSeed = AppState.currentDate.getTime() + AppState.currentTime.hour;
+    const seededRandom = (Math.sin(timeSeed + x * 1000 + y * 100 + z * 10) + 1) / 2;
+    const randomFactor = Math.sin(timeSeed * 0.001 + x * 0.3 + y * 0.5 + z * 0.7) * 15;
+    let effect = randomFactor;
     
-    // Hurricane structure parameters based on category
-    const eyeRadius = 0.5 + (settings.hurricaneIntensity * 0.2); // Eye: 0.7-1.5 units
-    const eyeWallRadius = eyeRadius + 0.8; // Eye wall: ~1.5-2.3 units
-    const spiralRadius = 8 + (settings.hurricaneIntensity * 2); // Outer bands: 10-18 units
+    switch(pattern) {
+      case 'nor_easter':
+        effect += (z * 2) + Math.sin(y * 0.8) * 15 + (seededRandom * 18 - 9);
+        break;
+      case 'gulf_stream':
+        effect += (x * 1.2) + Math.cos(y * 0.6) * 12 + (seededRandom * 16 - 8);
+        break;
+      case 'continental':
+        effect += (x + z) * 0.8 + Math.sin(y * 0.5) * 18 + (seededRandom * 22 - 11);
+        break;
+      case 'desert':
+        const thermalEffect = Math.max(0, 1 - (y / 10));
+        effect += Math.sin(x * 0.4) * 10 * thermalEffect + Math.cos(y * 0.7) * 20 + (seededRandom * 14 - 7);
+        break;
+      case 'pacific':
+        const jetStreamEffect = Math.min(1, y / 8);
+        effect += 25 * jetStreamEffect + (z * 1.5) + Math.sin(y * 0.4) * 25 + (seededRandom * 16 - 8);
+        break;
+      case 'plains':
+        effect += (x - z) * 1.2 + Math.cos(y * 0.6) * 16 + (seededRandom * 25 - 12.5);
+        break;
+    }
     
-    // Hurricane wind speeds by category (sustained winds in knots)
-    const categoryWinds = [0, 74, 96, 111, 131, 157]; // Cat 0-5
-    const maxWind = categoryWinds[settings.hurricaneIntensity];
+    return effect;
+  },
+
+  getTimeBasedVariation(x, y, z) {
+    const timeSeed = AppState.currentDate.getTime() + AppState.currentTime.hour;
+    return Math.sin(timeSeed + x * 30 + y * 40 + z * 35) * (5 + y * 2);
+  },
+
+  calculateSpeed(pattern, x, y, z) {
+    const baseSpeed = 10 + (y * CONSTANTS.WIND_SPEED.BASE_ALTITUDE_FACTOR);
+    let speed = baseSpeed;
+    
+    // Time variations
+    const hourFactor = Math.sin((AppState.currentTime.hour / 24) * 2 * Math.PI) * 5;
+    const dayOfYear = Math.floor((AppState.currentDate - new Date(AppState.currentDate.getFullYear(), 0, 0)) / 1000 / 60 / 60 / 24);
+    const seasonalFactor = Math.cos((dayOfYear / 365) * 2 * Math.PI) * 8;
+    
+    // Storm effects
+    if (Config.settings.hurricaneActive) {
+      speed = this.calculateHurricaneSpeed(x, y, z);
+    } else if (Config.settings.thunderstormActive) {
+      speed += this.calculateThunderstormSpeed(x, y, z);
+    }
+    
+    // Regional patterns
+    speed += this.getRegionalSpeedModifier(pattern, x, y, z);
+    speed += hourFactor + seasonalFactor;
+    
+    return Math.max(CONSTANTS.WIND_SPEED.MIN, Math.min(CONSTANTS.WIND_SPEED.MAX, speed));
+  },
+
+  calculateHurricaneSpeed(x, y, z) {
+    const dx = x - Config.settings.hurricanePosition.x;
+    const dz = z - Config.settings.hurricanePosition.z;
+    const distanceFromCenter = Utils.calculateDistance({ x, z }, Config.settings.hurricanePosition);
+    
+    const { EYE_BASE_RADIUS, EYE_RADIUS_SCALE, EYEWALL_OFFSET, SPIRAL_BASE_RADIUS, SPIRAL_RADIUS_SCALE, CATEGORY_WINDS } = CONSTANTS.HURRICANE;
+    const eyeRadius = EYE_BASE_RADIUS + (Config.settings.hurricaneIntensity * EYE_RADIUS_SCALE);
+    const eyeWallRadius = eyeRadius + EYEWALL_OFFSET;
+    const spiralRadius = SPIRAL_BASE_RADIUS + (Config.settings.hurricaneIntensity * SPIRAL_RADIUS_SCALE);
+    const maxWind = CATEGORY_WINDS[Config.settings.hurricaneIntensity];
     
     if (distanceFromCenter < eyeRadius) {
-      // Eye of the hurricane - very calm
-      speed = 5 + Math.random() * 10; // 5-15 knots, light and variable
+      return 5 + Math.random() * 10;
     } else if (distanceFromCenter < eyeWallRadius) {
-      // Eye wall - maximum winds
       const eyeWallIntensity = 1 - ((distanceFromCenter - eyeRadius) / (eyeWallRadius - eyeRadius));
-      speed = maxWind * 0.7 + (maxWind * 0.3 * eyeWallIntensity); // 70-100% of max winds
-      
-      // Add turbulence and gusts in eye wall
-      const turbulence = (Math.sin(x * 3 + y * 2 + z * 2.5) + 
-                         Math.cos(x * 2 + y * 2.5 + z * 2)) * 20;
+      let speed = maxWind * 0.7 + (maxWind * 0.3 * eyeWallIntensity);
+      const turbulence = (Math.sin(x * 3 + y * 2 + z * 2.5) + Math.cos(x * 2 + y * 2.5 + z * 2)) * 20;
       speed += turbulence;
-      
-      // Stronger at mid-levels (typical hurricane structure)
       const verticalProfile = Math.sin((y / 10) * Math.PI);
-      speed *= (0.7 + verticalProfile * 0.3);
-      
+      return speed * (0.7 + verticalProfile * 0.3);
     } else if (distanceFromCenter < spiralRadius) {
-      // Spiral bands - decreasing intensity with distance
       const bandIntensity = 1 - ((distanceFromCenter - eyeWallRadius) / (spiralRadius - eyeWallRadius));
-      speed = maxWind * 0.3 + (maxWind * 0.4 * bandIntensity); // 30-70% of max winds
-      
-      // Add spiral band variability
+      let speed = maxWind * 0.3 + (maxWind * 0.4 * bandIntensity);
       const bandVariation = Math.sin(distanceFromCenter * 1.5 + Date.now() * 0.001) * 15;
-      speed += bandVariation;
-      
-      // Feeder band effects
       const feederBandEffect = Math.cos(distanceFromCenter * 0.8) * 10;
-      speed += feederBandEffect;
-      
+      return speed + bandVariation + feederBandEffect;
     } else {
-      // Outside main circulation - add outflow effects at upper levels
+      let speed = 10 + (y * 2.5);
       if (y > 8) {
         const outflowIntensity = Math.exp(-(distanceFromCenter - spiralRadius) / 4);
-        speed += outflowIntensity * 25; // Upper-level outflow
+        speed += outflowIntensity * 25;
       } else {
-        // Surface inflow
         const inflowIntensity = Math.exp(-(distanceFromCenter - spiralRadius) / 6);
-        speed += inflowIntensity * 15; // Low-level inflow
+        speed += inflowIntensity * 15;
       }
+      return Math.max(5, speed);
     }
+  },
+
+  calculateThunderstormSpeed(x, y, z) {
+    const dx = x - Config.settings.thunderstormPosition.x;
+    const dz = z - Config.settings.thunderstormPosition.z;
+    const distanceFromStorm = Utils.calculateDistance({ x, z }, Config.settings.thunderstormPosition);
     
-    // Ensure realistic minimum speeds
-    speed = Math.max(5, speed);
-    
-  } else if (settings.thunderstormActive) {
-    // Calculate distance from storm center
-    const dx = x - settings.thunderstormPosition.x;
-    const dz = z - settings.thunderstormPosition.z;
-    const distanceFromStorm = Math.sqrt(dx * dx + dz * dz);
-    
-    // Storm influence decreases with distance (exponential decay)
     const stormInfluence = Math.exp(-distanceFromStorm / 4);
-    
-    // Add strong vertical development (more intense at mid-levels)
     const verticalDevelopment = Math.sin((y / 10) * Math.PI) * 30;
-    
-    // Add chaotic variations near the storm
-    const turbulence = (Math.sin(x * 2.5 + y * 1.8 + z * 2.2) + 
-                       Math.cos(x * 1.8 + y * 2.2 + z * 1.5)) * 15;
-    
-    // Combine storm effects
+    const turbulence = (Math.sin(x * 2.5 + y * 1.8 + z * 2.2) + Math.cos(x * 1.8 + y * 2.2 + z * 1.5)) * 15;
     const stormEffect = (verticalDevelopment + turbulence) * stormInfluence;
-    speed += stormEffect;
     
-    // Ensure minimum storm speed and add extra intensity near core
+    let additionalSpeed = stormEffect;
     if (distanceFromStorm < 3 && y > 2) {
-      speed = Math.max(speed, 70 + (Math.random() * 20)); // Strong storm core
+      additionalSpeed = Math.max(additionalSpeed, 60 + (Math.random() * 20));
+    }
+    
+    return additionalSpeed;
+  },
+
+  getRegionalSpeedModifier(pattern, x, y, z) {
+    const timeSeed = AppState.currentDate.getTime() + AppState.currentTime.hour;
+    const seededRandom = (Math.sin(timeSeed + x * 1000 + y * 100 + z * 10) + 1) / 2;
+    
+    switch(pattern) {
+      case 'nor_easter':
+        return (x + 10) * 1.8 + Math.sin(z * 0.4) * 8 + (seededRandom * 18 - 9);
+      case 'gulf_stream':
+        const coastalEffect = Math.sin((z + 10) * 0.3) * 12;
+        return coastalEffect + (seededRandom * 16 - 8);
+      case 'continental':
+        const lakeEffect = Math.cos(x * 0.6) * Math.sin(z * 0.5) * 15;
+        return lakeEffect + (seededRandom * 22 - 11);
+      case 'desert':
+        const thermalEffect = Math.abs(x) + Math.abs(z);
+        const thermalBoost = AppState.currentTime.hour >= 10 && AppState.currentTime.hour <= 16 ? 8 : 0;
+        return thermalEffect * 0.8 + Math.sin(y * 0.4) * 10 + (seededRandom * 14 - 7) + thermalBoost;
+      case 'pacific':
+        return (10 - x) * 2.0 + Math.cos(y * 0.3) * 6 + (seededRandom * 16 - 8);
+      case 'plains':
+        const stormEffect = Math.sin((x + z) * 0.4) * 12;
+        return stormEffect + (seededRandom * 25 - 12.5);
+      default:
+        return 0;
     }
   }
-  
-  // Continue with existing regional patterns
-  switch(pattern) {
-    case 'nor_easter':
-      // Northeast: Strong easterly flows, coastal influence
-      speed += (x + 10) * 1.8 + Math.sin(z * 0.4) * 8 + (seededRandom * 18 - 9);
-      speed += hourFactor + seasonalFactor;
-      break;
-    case 'gulf_stream':
-      // Southeast: Tropical patterns, gulf moisture influence
-      const coastalEffect = Math.sin((z + 10) * 0.3) * 12;
-      speed += coastalEffect + (seededRandom * 16 - 8);
-      speed += hourFactor * 0.8 + seasonalFactor * 1.2;
-      break;
-    case 'continental':
-      // Midwest: Variable continental patterns, lake effects
-      const lakeEffect = Math.cos(x * 0.6) * Math.sin(z * 0.5) * 15;
-      speed += lakeEffect + (seededRandom * 22 - 11);
-      speed += hourFactor * 1.5 + seasonalFactor;
-      break;
-    case 'desert':
-      // Southwest: Thermal updrafts, mountain wave patterns (stronger during day)
-      const thermalEffect = Math.abs(x) + Math.abs(z);
-      const thermalBoost = currentTime.hour >= 10 && currentTime.hour <= 16 ? 8 : 0;
-      speed += thermalEffect * 0.8 + Math.sin(y * 0.4) * 10 + (seededRandom * 14 - 7);
-      speed += thermalBoost + seasonalFactor * 0.5;
-      break;
-    case 'pacific':
-      // Northwest: Strong westerly flow, marine layer influence
-      speed += (10 - x) * 2.0 + Math.cos(y * 0.3) * 6 + (seededRandom * 16 - 8);
-      speed += hourFactor * 0.6 + seasonalFactor * 1.3;
-      break;
-    case 'plains':
-      // Great Plains: Prairie winds, storm system influence
-      const stormEffect = Math.sin((x + z) * 0.4) * 12;
-      speed += stormEffect + (seededRandom * 25 - 12.5);
-      speed += hourFactor * 1.2 + seasonalFactor;
-      break;
-  }
-  
-  return Math.max(5, Math.min(100, speed));
-}
+};
 
-// Create individual wind cube with basic material
-function createWindCube(x, y, z, speed, flightLevel) {
-  const geometry = new THREE.BoxGeometry(2, 2, 2); // Proper 2x2x2 cubes
-  
-  // Generate wind direction for this cube
-  const windPattern = regions[settings.region].windPattern;
-  const windDirection = generateWindDirection(x, y, z, windPattern);
-  
-  // Basic color mapping with thunderstorm effects
-  let color;
-  if (settings.hurricaneActive) {
-    const dx = x - settings.hurricanePosition.x;
-    const dz = z - settings.hurricanePosition.z;
-    const distanceFromCenter = Math.sqrt(dx * dx + dz * dz);
+// === SCENE MANAGEMENT ===
+const SceneManager = {
+  init() {
+    this.setupScene();
+    this.setupCamera();
+    this.setupRenderer();
+    this.setupControls();
+    this.setupLighting();
+    this.setupInteraction();
+    this.createGroundPlane();
+    this.createArrowGeometry();
+  },
+
+  setupScene() {
+    AppState.scene = new THREE.Scene();
+    this.updateBackgroundColor(Config.settings.darkBackground);
+  },
+
+  setupCamera() {
+    const canvas = document.getElementById('three-canvas');
+    const rect = canvas.getBoundingClientRect();
+    AppState.camera = new THREE.PerspectiveCamera(75, rect.width / rect.height, 0.1, 1000);
+    AppState.camera.position.set(15, 20, 15);
+  },
+
+  setupRenderer() {
+    const canvas = document.getElementById('three-canvas');
+    const rect = canvas.getBoundingClientRect();
+    AppState.renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
+    AppState.renderer.setSize(rect.width, rect.height);
+    AppState.renderer.setPixelRatio(window.devicePixelRatio);
+  },
+
+  setupControls() {
+    AppState.controls = new THREE.OrbitControls(AppState.camera, AppState.renderer.domElement);
+    AppState.controls.enableDamping = true;
+    AppState.controls.dampingFactor = 0.05;
+    AppState.controls.enablePan = false;
+  },
+
+  setupLighting() {
+    const ambientLight = new THREE.AmbientLight(0xffffff, 1.0);
+    AppState.scene.add(ambientLight);
+  },
+
+  setupInteraction() {
+    AppState.raycaster = new THREE.Raycaster();
+    AppState.mouse = new THREE.Vector2();
+  },
+
+  updateBackgroundColor(isDark) {
+    const color = isDark ? CONSTANTS.COLORS.BACKGROUND.DARK : CONSTANTS.COLORS.BACKGROUND.LIGHT;
+    AppState.scene.background = new THREE.Color(color);
+  },
+
+  createGroundPlane() {
+    const geometry = new THREE.PlaneGeometry(CONSTANTS.MAP.GROUND_SIZE, CONSTANTS.MAP.GROUND_SIZE);
     
-    // Hurricane structure parameters
-    const eyeRadius = 0.5 + (settings.hurricaneIntensity * 0.2);
-    const eyeWallRadius = eyeRadius + 0.8;
-    const spiralRadius = 8 + (settings.hurricaneIntensity * 2);
+    AppState.mapCanvas = document.createElement('canvas');
+    AppState.mapCanvas.width = CONSTANTS.MAP.TEXTURE_SIZE;
+    AppState.mapCanvas.height = CONSTANTS.MAP.TEXTURE_SIZE;
+    AppState.mapContext = AppState.mapCanvas.getContext('2d');
     
-    if (distanceFromCenter < eyeRadius) {
-      // Eye - calm, blue-white color
-      color = new THREE.Color(0x87CEEB); // Sky blue for calm eye
-    } else if (distanceFromCenter < eyeWallRadius) {
-      // Eye wall - intense purple/magenta for maximum winds
-      const intensity = 1 - ((distanceFromCenter - eyeRadius) / (eyeWallRadius - eyeRadius));
-      color = new THREE.Color(0xFF00FF).lerp(new THREE.Color(0x8B0000), intensity); // Magenta to dark red
-      
-      // Add pulsing effect to eye wall
-      const pulseIntensity = (Math.sin(Date.now() * 0.003) + 1) * 0.5;
-      color.multiplyScalar(0.8 + pulseIntensity * 0.2);
-    } else if (distanceFromCenter < spiralRadius) {
-      // Spiral bands - gradient from red to orange to yellow
-      const bandIntensity = 1 - ((distanceFromCenter - eyeWallRadius) / (spiralRadius - eyeWallRadius));
-      
-      if (speed > 60) {
-        color = new THREE.Color(0xFF0000).lerp(new THREE.Color(0xFF8800), 1 - bandIntensity);
-      } else if (speed > 40) {
-        color = new THREE.Color(0xFF8800).lerp(new THREE.Color(0xFFFF00), 1 - bandIntensity);
-      } else {
-        color = new THREE.Color(0xFFFF00).lerp(new THREE.Color(0x66FF66), 1 - bandIntensity);
-      }
-    } else {
-      // Outside hurricane - normal wind speed coloring
-      if (speed < 20) {
-        color = 0x00AA00; // Dark green - calm
-      } else if (speed < 35) {
-        color = 0x66FF66; // Light green - light
-      } else if (speed < 50) {
-        color = 0xFFFF00; // Yellow - moderate
-      } else if (speed < 65) {
-        color = 0xFF8800; // Orange - strong
-      } else {
-        color = 0xFF0000; // Red - very strong
-      }
-    }
-  } else if (settings.thunderstormActive) {
-    const dx = x - settings.thunderstormPosition.x;
-    const dz = z - settings.thunderstormPosition.z;
-    const distanceFromStorm = Math.sqrt(dx * dx + dz * dz);
+    AppState.mapContext.fillStyle = '#4a7c59';
+    AppState.mapContext.fillRect(0, 0, CONSTANTS.MAP.TEXTURE_SIZE, CONSTANTS.MAP.TEXTURE_SIZE);
     
-    if (distanceFromStorm < 3 && y > 2) {
-      // Storm core - intense reds
-      color = new THREE.Color(0xFF0000);
-      // Add pulsing effect to storm core
-      const pulseIntensity = (Math.sin(Date.now() * 0.002) + 1) * 0.5;
-      color.multiplyScalar(0.7 + pulseIntensity * 0.3);
-    } else if (distanceFromStorm < 5) {
-      // Storm periphery - orange to red gradient
-      const intensity = Math.max(0.5, 1 - (distanceFromStorm / 5));
-      color = new THREE.Color(0xFF8800).lerp(new THREE.Color(0xFF0000), intensity);
-    } else {
-      // Normal wind speed coloring
-      if (speed < 20) {
-        color = 0x00AA00; // Dark green - calm
-      } else if (speed < 35) {
-        color = 0x66FF66; // Light green - light
-      } else if (speed < 50) {
-        color = 0xFFFF00; // Yellow - moderate
-      } else if (speed < 65) {
-        color = 0xFF8800; // Orange - strong
-      } else {
-        color = 0xFF0000; // Red - very strong
-      }
-    }
-  } else {
-    // Normal wind speed coloring without storm
-    if (speed < 20) {
-      color = 0x00AA00; // Dark green - calm
-    } else if (speed < 35) {
-      color = 0x66FF66; // Light green - light
-    } else if (speed < 50) {
-      color = 0xFFFF00; // Yellow - moderate
-    } else if (speed < 65) {
-      color = 0xFF8800; // Orange - strong
-    } else {
-      color = 0xFF0000; // Red - very strong
-    }
-  }
-  
-  // Create basic material
-  const material = new THREE.MeshLambertMaterial({ 
-    color: color,
-    transparent: true,
-    opacity: settings.cubeOpacity
-  });
-  
-  const cube = new THREE.Mesh(geometry, material);
-  cube.position.set(x, y, z);
-  cube.userData = { 
-    speed: speed, 
-    flightLevel: flightLevel,
-    yLevel: y / 2, // Adjust for hover grouping
-    windDirection: windDirection // Store wind direction
-  };
-  
-  // Create wind direction arrow (hidden by default)
-  const arrow = new THREE.Mesh(arrowGeometry.clone(), arrowMaterial.clone());
-  
-  // Position arrow above the cube so it's clearly visible
-  arrow.position.set(x, y + 1.5, z);
-  
-  // Base rotation to point east (WORKING!)
-  arrow.rotation.x = Math.PI / 2; // Tip over 90° from up to forward (south)
-  arrow.rotation.y = 0; // No Y rotation  
-  arrow.rotation.z = -Math.PI / 2; // Z-axis turn from south to east
-  
-  // Add wind direction variation around Y-axis
-  const windAngle = Math.atan2(windDirection.z, windDirection.x);
-  arrow.rotation.y += windAngle * 0.3; // Small wind direction variation
-  
-  // Add banking/tilting for realistic wind flow patterns
-  const bankingFactor = Math.sin((x + z) * 0.3) * 0.08; // Subtle banking variation
-  const speedBanking = (speed - 50) / 300; // Faster winds bank more (reduced)
-  const altitudeBanking = y * 0.005; // Higher altitudes have more banking (reduced)
-  
-  // Apply banking as additional Z rotation
-  arrow.rotation.z += bankingFactor + speedBanking + altitudeBanking;
-  
-  // Scale arrow based on wind speed (shorter, more reasonable size)
-  const arrowScale = 0.4 + (speed / 100) * 0.3; // Scale from 0.4 to 0.7 (reasonable size)
-  arrow.scale.setScalar(arrowScale);
-  
-  // Hide arrow by default
-  arrow.visible = false;
-  arrow.userData = { 
-    cubeIndex: windCubes.length, // Reference to parent cube
-    yLevel: y / 2
-  };
-  
-  scene.add(cube);
-  scene.add(arrow);
-  windCubes.push(cube);
-  windArrows.push(arrow);
-}
-
-// Create flight level labels
-function createFlightLevelLabels() {
-  // Show labels at each flight level (every 2 y-units = 50 flight level increment)
-  for (let y = 0; y < 20; y += 2) {
-    const flightLevel = 50 + ((y / 2) * 50);
-    const flStr = String(flightLevel).padStart(3, '0');
-    createTextSprite(`FL${flStr}`, 11, y, 0);
-  }
-  
-  // Add compass directions on the ground plane
-  createCompassLabels();
-}
-
-// Create compass direction labels
-function createCompassLabels() {
-  // N, S, E, W labels around the ground plane edges
-  createTextSprite('N', 0, 0, -11);  // North - negative Z (away from viewer)
-  createTextSprite('S', 0, 0, 11);   // South - positive Z (toward viewer)
-  createTextSprite('E', 11, 0, 0);   // East - positive X
-  createTextSprite('W', -11, 0, 0);  // West - negative X
-}
-
-// Create text sprite for labels
-function createTextSprite(text, x, y, z) {
-  const canvas = document.createElement('canvas');
-  const context = canvas.getContext('2d');
-  canvas.width = 256;
-  canvas.height = 64;
-  
-  context.fillStyle = 'rgba(0, 0, 0, 0.8)';
-  context.fillRect(0, 0, canvas.width, canvas.height);
-  
-  context.fillStyle = 'white';
-  context.font = '24px Geist, system-ui, sans-serif';
-  context.textAlign = 'center';
-  context.fillText(text, canvas.width / 2, 40);
-  
-  const texture = new THREE.CanvasTexture(canvas);
-  const material = new THREE.SpriteMaterial({ map: texture });
-  const sprite = new THREE.Sprite(material);
-  
-  sprite.position.set(x, y, z);
-  sprite.scale.set(4, 1, 1);
-  scene.add(sprite);
-}
-
-// Create tooltip element
-function createTooltip() {
-  tooltip = document.createElement('div');
-  tooltip.id = 'tooltip';
-  tooltip.style.position = 'absolute';
-  tooltip.style.backgroundColor = 'rgba(0, 20, 40, 0.9)';
-  tooltip.style.color = 'white';
-  tooltip.style.padding = '8px 12px';
-  tooltip.style.borderRadius = '6px';
-  tooltip.style.fontSize = '14px';
-  tooltip.style.fontFamily = 'Geist, system-ui, sans-serif';
-  tooltip.style.pointerEvents = 'none';
-  tooltip.style.zIndex = '1000';
-  tooltip.style.display = 'none';
-  tooltip.style.whiteSpace = 'nowrap';
-  tooltip.style.border = '2px solid white';
-  tooltip.style.boxShadow = '0 0 20px white';
-  tooltip.style.backdropFilter = 'blur(8px)';
-  tooltip.style.webkitBackdropFilter = 'blur(8px)';
-  document.body.appendChild(tooltip);
-}
-
-// Initialize mini map
-function initMiniMap() {
-  miniMapContainer = document.getElementById('mini-map-container');
-  miniMapCanvas = document.getElementById('mini-map-canvas');
-  
-  // Set up mini map scene
-  miniMapScene = new THREE.Scene();
-  miniMapScene.background = new THREE.Color(0x000000);
-  
-  // Set up orthographic camera for top-down view
-  miniMapCamera = new THREE.OrthographicCamera(-10, 10, 10, -10, 0.1, 100);
-  miniMapCamera.position.set(0, 50, 0);
-  miniMapCamera.lookAt(0, 0, 0);
-  
-  // Set up mini map renderer
-  miniMapRenderer = new THREE.WebGLRenderer({ canvas: miniMapCanvas, antialias: true });
-  
-  // Set initial size based on container
-  const containerRect = miniMapContainer.getBoundingClientRect();
-  miniMapRenderer.setSize(containerRect.width - 8, containerRect.height - 8); // Account for border
-  
-  // Add lighting
-  const miniMapLight = new THREE.AmbientLight(0xffffff, 1.0);
-  miniMapScene.add(miniMapLight);
-  
-  // Create ground plane for mini map
-  const miniMapGeometry = new THREE.PlaneGeometry(20, 20);
-  const miniMapMaterial = new THREE.MeshLambertMaterial({ color: 0x4a7c59 });
-  miniMapGroundPlane = new THREE.Mesh(miniMapGeometry, miniMapMaterial);
-  miniMapGroundPlane.rotation.x = -Math.PI / 2;
-  miniMapGroundPlane.position.y = -1;
-  miniMapScene.add(miniMapGroundPlane);
-}
-
-// Update mini map when flight level is selected
-function updateMiniMap() {
-  if (!miniMapRenderer) return;
-  
-  if (selectedFlightLevel !== null) {
-    // Show mini map
-    miniMapContainer.classList.add('visible');
+    AppState.mapTexture = new THREE.CanvasTexture(AppState.mapCanvas);
     
-    // Clear existing mini map cubes
-    miniMapCubes.forEach(cube => {
-      miniMapScene.remove(cube);
+    const material = new THREE.MeshLambertMaterial({ map: AppState.mapTexture });
+    AppState.groundPlane = new THREE.Mesh(geometry, material);
+    AppState.groundPlane.rotation.x = -Math.PI / 2;
+    AppState.groundPlane.position.y = -1;
+    AppState.scene.add(AppState.groundPlane);
+    
+    MapManager.init();
+  },
+
+  createArrowGeometry() {
+    const shaftGeometry = new THREE.CylinderGeometry(0.03, 0.06, 1.0, 8);
+    const headGeometry = new THREE.ConeGeometry(0.12, 0.3, 8);
+    
+    AppState.arrowGeometry = new THREE.BufferGeometry();
+    
+    const shaftMatrix = new THREE.Matrix4();
+    const headMatrix = new THREE.Matrix4();
+    headMatrix.setPosition(0, 0.65, 0);
+    
+    const shaftGeo = shaftGeometry.clone().applyMatrix4(shaftMatrix);
+    const headGeo = headGeometry.clone().applyMatrix4(headMatrix);
+    
+    AppState.arrowGeometry = THREE.BufferGeometryUtils.mergeBufferGeometries([shaftGeo, headGeo]);
+    
+    AppState.arrowMaterial = new THREE.MeshLambertMaterial({
+      color: CONSTANTS.COLORS.ARROW,
+      transparent: true,
+      opacity: 0.85
     });
-    miniMapCubes = [];
-    
-    // Clear existing HTML arrows
-    miniMapArrows.forEach(arrow => {
-      miniMapContainer.removeChild(arrow);
-    });
-    miniMapArrows = [];
-    
-    // Add selected flight level cubes to mini map
-    windCubes.forEach(cube => {
-      if (cube.userData.yLevel === selectedFlightLevel) {
-        const miniCube = cube.clone();
-        miniCube.position.copy(cube.position);
-        miniCube.position.y = 0; // Flatten to ground level for top view
-        miniCube.material = cube.material.clone();
-        miniCube.material.opacity = 0.25; // Further reduced opacity to see map better
-        miniMapScene.add(miniCube);
-        miniMapCubes.push(miniCube);
-        
-        // Create HTML arrow for this cube
-        createMiniMapArrow(cube);
-      }
-    });
-  } else {
-    // Hide mini map
-    miniMapContainer.classList.remove('visible');
-    
-    // Clear HTML arrows when hiding
-    miniMapArrows.forEach(arrow => {
-      miniMapContainer.removeChild(arrow);
-    });
-    miniMapArrows = [];
   }
-}
+};
 
-// Create HTML arrow for mini map
-function createMiniMapArrow(cube) {
-  const arrow = document.createElement('div');
-  arrow.className = 'mini-map-arrow';
-  
-  // Get wind direction data from the cube
-  const windDirection = cube.userData.windDirection;
-  
-  // Calculate position in mini map coordinates
-  // Convert world position (-10 to 10) to mini map percentage (0% to 100%)
-  const containerRect = miniMapContainer.getBoundingClientRect();
-  const mapSize = containerRect.width - 8; // Account for border
-  
-  // Map world coordinates to mini map coordinates
-  const worldX = cube.position.x; // -9 to 9
-  const worldZ = cube.position.z; // -9 to 9
-  
-  // Convert to 0-1 range, then to pixels
-  const normalizedX = (worldX + 10) / 20; // Convert -10 to 10 to 0 to 1
-  const normalizedZ = (worldZ + 10) / 20; // Convert -10 to 10 to 0 to 1
-  
-  const pixelX = normalizedX * mapSize;
-  const pixelZ = normalizedZ * mapSize;
-  
-  // Position arrow (remember Y is flipped in CSS, and it's a top-down view)
-  arrow.style.left = `${pixelX}px`;
-  arrow.style.top = `${pixelZ}px`;
-  
-  // Calculate rotation angle from wind direction (top-down view)
-  // In top-down view: X = right, Z = down
-  const windAngle = Math.atan2(windDirection.z, windDirection.x) * 180 / Math.PI;
-  
-  // Add banking effect based on wind speed and position
-  const speed = cube.userData.speed;
-  const bankingEffect = Math.sin((cube.position.x + cube.position.z) * 0.3) * 5; // ±5 degrees
-  const speedBanking = (speed - 50) / 10; // Faster winds get more banking
-  
-  const totalRotation = windAngle + bankingEffect + speedBanking;
-  
-  // Apply rotation and banking
-  arrow.style.transform = `translate(-50%, -100%) rotate(${totalRotation}deg)`;
-  
-  // Scale based on wind speed
-  const scale = 0.6 + (speed / 100) * 0.4; // Scale from 0.6 to 1.0
-  arrow.style.transform += ` scale(${scale})`;
-  
-  // Set initial visibility based on setting
-  arrow.style.display = settings.showWindArrows ? 'block' : 'none';
-  
-  // Add to container and track
-  miniMapContainer.appendChild(arrow);
-  miniMapArrows.push(arrow);
-  
-  // Store cube reference for position updates
-  arrow.dataset.cubeIndex = windCubes.indexOf(cube);
-}
-
-// Update mini map arrow positions after resize
-function updateMiniMapArrowPositions() {
-  const containerRect = miniMapContainer.getBoundingClientRect();
-  const mapSize = containerRect.width - 8; // Account for border
-  
-  miniMapArrows.forEach(arrow => {
-    const cubeIndex = parseInt(arrow.dataset.cubeIndex);
-    const cube = windCubes[cubeIndex];
+// === WIND CUBE GENERATION ===
+const WindGenerator = {
+  generateGrid() {
+    this.clearExisting();
+    const windPattern = Config.regions[Config.settings.region].windPattern;
     
-    if (cube && cube.userData.yLevel === selectedFlightLevel) {
-      // Recalculate position
-      const worldX = cube.position.x;
-      const worldZ = cube.position.z;
-      
-      const normalizedX = (worldX + 10) / 20;
-      const normalizedZ = (worldZ + 10) / 20;
-      
-      const pixelX = normalizedX * mapSize;
-      const pixelZ = normalizedZ * mapSize;
-      
-      // Update position
-      arrow.style.left = `${pixelX}px`;
-      arrow.style.top = `${pixelZ}px`;
-    }
-  });
-}
-
-// Update mini map ground plane when region changes
-function updateMiniMapGroundPlane() {
-  if (!miniMapGroundPlane) return;
-  
-  // Use the same texture as the main ground plane with subtle brightness enhancement
-  if (mapTexture) {
-    // Clone the material to avoid affecting the main ground plane
-    miniMapGroundPlane.material = new THREE.MeshLambertMaterial({ 
-      map: mapTexture,
-      color: 0xcccccc // Slightly brighter than normal (light gray tint)
-    });
-    
-    // Add very subtle emissive for better visibility
-    miniMapGroundPlane.material.emissive = new THREE.Color(0x111111);
-    miniMapGroundPlane.material.needsUpdate = true;
-  }
-}
-
-// Handle mouse movement for interactions
-function onMouseMove(event) {
-  // Skip if currently resizing mini map
-  if (isResizing) {
-    return;
-  }
-  
-  const canvas = renderer.domElement;
-  const rect = canvas.getBoundingClientRect();
-  
-  mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-  mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-  
-  raycaster.setFromCamera(mouse, camera);
-  const intersects = raycaster.intersectObjects(windCubes);
-  
-  if (intersects.length > 0) {
-    const hoveredCube = intersects[0].object;
-    const hoveredYLevel = hoveredCube.userData.yLevel;
-    
-    // If a flight level is selected, find the cube at the same x,z position but at the selected level
-    let cubeToShow = hoveredCube;
-    if (selectedFlightLevel !== null) {
-      // Find cube at the same x,z position but at selected flight level
-      const targetCube = windCubes.find(cube => 
-        cube.position.x === hoveredCube.position.x && 
-        cube.position.z === hoveredCube.position.z && 
-        cube.userData.yLevel === selectedFlightLevel
-      );
-      if (targetCube) {
-        cubeToShow = targetCube;
-      }
-    }
-    
-    const flightLevel = cubeToShow.userData.flightLevel;
-    const windSpeed = cubeToShow.userData.speed;
-    isHovering = true;
-    
-    // Change cursor to pointer when hovering over cubes
-    canvas.style.cursor = 'pointer';
-    
-    // Show tooltip with flight level info
-    tooltip.style.display = 'block';
-    tooltip.style.left = (event.clientX + 10) + 'px';
-    tooltip.style.top = (event.clientY - 10) + 'px';
-    
-    // Get current region bounds
-    const regionBounds = regions[settings.region].bounds;
-    
-    // Convert grid position to geographic coordinates
-    // Interpolate between region bounds based on normalized grid position
-    const normalizedX = (cubeToShow.position.x + 10) / 20; // Convert -10 to 10 to 0 to 1
-    const normalizedZ = (cubeToShow.position.z + 10) / 20; // Convert -10 to 10 to 0 to 1
-    
-    // Calculate lat/lon using region bounds
-    const lat = regionBounds[0][0] + (regionBounds[1][0] - regionBounds[0][0]) * normalizedZ;
-    const lon = regionBounds[0][1] + (regionBounds[1][1] - regionBounds[0][1]) * normalizedX;
-    
-    // Calculate wind direction in degrees (from wind direction vector)
-    const windDir = cubeToShow.userData.windDirection;
-    const windAngle = Math.atan2(windDir.z, windDir.x) * 180 / Math.PI;
-    const windDirection = ((windAngle + 360) % 360).toFixed(0); // Convert to 0-360 degrees
-    
-    // Format coordinates to 2 decimal places
-    const latStr = Math.abs(lat).toFixed(2) + '°' + (lat >= 0 ? 'N' : 'S');
-    const lonStr = Math.abs(lon).toFixed(2) + '°' + (lon >= 0 ? 'E' : 'W');
-    
-    tooltip.innerHTML = `FL${String(flightLevel).padStart(3, '0')}<br/>Wind: ${windSpeed} kt @ ${windDirection}°<br/>${latStr} ${lonStr}`;
-    
-    // Only apply hover effects if no flight level is currently selected
-    if (selectedFlightLevel === null) {
-      // Apply hover effects
-      windCubes.forEach(cube => {
-        let targetOpacity;
-        if (cube.userData.yLevel === hoveredYLevel) {
-          // Highlight hovered level (preview)
-          targetOpacity = 0.4;
-        } else {
-          // Dim other levels using GUI setting
-          targetOpacity = settings.cubeOpacity;
+    for (let x = -CONSTANTS.GRID.RANGE; x <= CONSTANTS.GRID.RANGE; x += CONSTANTS.GRID.SPACING) {
+      for (let y = 0; y < CONSTANTS.FLIGHT_LEVELS.COUNT; y++) {
+        for (let z = -CONSTANTS.GRID.RANGE; z <= CONSTANTS.GRID.RANGE; z += CONSTANTS.GRID.SPACING) {
+          const flightLevel = CONSTANTS.FLIGHT_LEVELS.MIN + (y * CONSTANTS.FLIGHT_LEVELS.INCREMENT);
+          const speed = WindCalculator.calculateSpeed(windPattern, x, y * CONSTANTS.GRID.SPACING, z);
+          this.createCube(x, y * CONSTANTS.GRID.SPACING, z, Math.round(speed), flightLevel);
         }
+      }
+    }
+  },
+
+  clearExisting() {
+    AppState.windCubes.forEach(cube => AppState.scene.remove(cube));
+    AppState.windArrows.forEach(arrow => AppState.scene.remove(arrow));
+    AppState.windCubes = [];
+    AppState.windArrows = [];
+  },
+
+  createCube(x, y, z, speed, flightLevel) {
+    const geometry = new THREE.BoxGeometry(2, 2, 2);
+    const windPattern = Config.regions[Config.settings.region].windPattern;
+    const windDirection = WindCalculator.generateDirection(x, y, z, windPattern);
+    
+    // Determine color based on conditions
+    let color, stormType = null, distanceFromCenter = Infinity, isStormCore = false;
+    
+    if (Config.settings.hurricaneActive) {
+      stormType = 'hurricane';
+      distanceFromCenter = Utils.calculateDistance({ x, z }, Config.settings.hurricanePosition);
+    } else if (Config.settings.thunderstormActive) {
+      stormType = 'thunderstorm';
+      distanceFromCenter = Utils.calculateDistance({ x, z }, Config.settings.thunderstormPosition);
+      isStormCore = distanceFromCenter < 3 && y > 2;
+    }
+    
+    color = Utils.getWindSpeedColor(speed, stormType, distanceFromCenter, isStormCore);
+    
+    const material = new THREE.MeshLambertMaterial({ 
+      color: color,
+      transparent: true,
+      opacity: Config.settings.cubeOpacity
+    });
+    
+    const cube = new THREE.Mesh(geometry, material);
+    cube.position.set(x, y, z);
+    cube.userData = { 
+      speed: speed, 
+      flightLevel: flightLevel,
+      yLevel: y / CONSTANTS.GRID.SPACING,
+      windDirection: windDirection
+    };
+    
+    // Create arrow
+    const arrow = this.createArrow(cube, windDirection, speed);
+    
+    AppState.scene.add(cube);
+    AppState.scene.add(arrow);
+    AppState.windCubes.push(cube);
+    AppState.windArrows.push(arrow);
+  },
+
+  createArrow(cube, windDirection, speed) {
+    const arrow = new THREE.Mesh(AppState.arrowGeometry.clone(), AppState.arrowMaterial.clone());
+    
+    arrow.position.set(cube.position.x, cube.position.y + 1.5, cube.position.z);
+    
+    // Base rotation
+    arrow.rotation.x = Math.PI / 2;
+    arrow.rotation.y = 0;
+    arrow.rotation.z = -Math.PI / 2;
+    
+    // Wind direction
+    const windAngle = Math.atan2(windDirection.z, windDirection.x);
+    arrow.rotation.y += windAngle * 0.3;
+    
+    // Banking effects
+    const bankingFactor = Math.sin((cube.position.x + cube.position.z) * 0.3) * 0.08;
+    const speedBanking = (speed - 50) / 300;
+    const altitudeBanking = cube.position.y * 0.005;
+    arrow.rotation.z += bankingFactor + speedBanking + altitudeBanking;
+    
+    // Scale
+    const arrowScale = 0.4 + (speed / 100) * 0.3;
+    arrow.scale.setScalar(arrowScale);
+    
+    arrow.visible = false;
+    arrow.userData = { 
+      cubeIndex: AppState.windCubes.length,
+      yLevel: cube.position.y / CONSTANTS.GRID.SPACING
+    };
+    
+    return arrow;
+  },
+
+  regenerate() {
+    this.generateGrid();
+    
+    // Restore selection state
+    if (AppState.selectedFlightLevel !== null) {
+      SelectionManager.selectFlightLevel(AppState.selectedFlightLevel);
+    }
+  }
+};
+
+// === SELECTION MANAGEMENT ===
+const SelectionManager = {
+  selectFlightLevel(yLevel) {
+    this.deselectFlightLevel();
+    
+    AppState.selectedFlightLevel = yLevel;
+    
+    AppState.windCubes.forEach(cube => {
+      if (cube.userData.yLevel === yLevel) {
+        cube.material.opacity = 0.5;
         
-        cube.material.opacity = targetOpacity;
-      });
+        const wireframeGeometry = new THREE.BoxGeometry(2, 2, 2);
+        const wireframeMaterial = new THREE.MeshBasicMaterial({
+          color: 0xffffff,
+          wireframe: true,
+          transparent: true,
+          opacity: 0.8
+        });
+        const wireframe = new THREE.Mesh(wireframeGeometry, wireframeMaterial);
+        wireframe.position.copy(cube.position);
+        AppState.scene.add(wireframe);
+        AppState.selectedCubes.push(wireframe);
+      } else {
+        cube.material.opacity = Config.settings.cubeOpacity;
+      }
+    });
+    
+    this.updateArrowVisibility();
+    MiniMapManager.update();
+  },
+
+  deselectFlightLevel() {
+    AppState.selectedFlightLevel = null;
+    
+    AppState.selectedCubes.forEach(wireframe => AppState.scene.remove(wireframe));
+    AppState.selectedCubes = [];
+    
+    AppState.windCubes.forEach(cube => {
+      cube.material.opacity = Config.settings.cubeOpacity;
+    });
+    
+    this.updateArrowVisibility();
+    MiniMapManager.update();
+  },
+
+  updateArrowVisibility() {
+    AppState.windArrows.forEach(arrow => {
+      arrow.visible = Config.settings.showWindArrows && 
+                     AppState.selectedFlightLevel !== null && 
+                     arrow.userData.yLevel === AppState.selectedFlightLevel;
+    });
+  },
+
+  toggleWindArrows(showArrows) {
+    Config.settings.showWindArrows = showArrows;
+    this.updateArrowVisibility();
+    MiniMapManager.updateArrowVisibility();
+  }
+};
+
+// === EVENT HANDLERS ===
+const EventHandlers = {
+  init() {
+    const canvas = AppState.renderer.domElement;
+    
+    // Mouse events
+    canvas.addEventListener('mousemove', this.onMouseMove.bind(this));
+    canvas.addEventListener('mousedown', this.onMouseDown.bind(this));
+    canvas.addEventListener('mouseup', this.onMouseUp.bind(this));
+    canvas.addEventListener('click', this.onMouseClick.bind(this));
+    
+    // Touch events
+    canvas.addEventListener('touchstart', this.onTouchStart.bind(this), { passive: false });
+    canvas.addEventListener('touchmove', this.onTouchMove.bind(this), { passive: false });
+    canvas.addEventListener('touchend', this.onTouchEnd.bind(this), { passive: false });
+    
+    // Window events
+    window.addEventListener('resize', this.onWindowResize.bind(this));
+    window.addEventListener('blur', this.onWindowBlur.bind(this));
+    
+    // Mini map resize
+    const resizeHandle = document.getElementById('mini-map-resize-handle');
+    resizeHandle.addEventListener('mousedown', MiniMapManager.onResizeStart.bind(MiniMapManager));
+    resizeHandle.addEventListener('touchstart', MiniMapManager.onResizeStart.bind(MiniMapManager), { passive: false });
+  },
+
+  onMouseMove(event) {
+    if (AppState.miniMap.isResizing) return;
+    
+    this.updateMousePosition(event.clientX, event.clientY);
+    this.handleHover();
+  },
+
+  onMouseDown(event) {
+    AppState.mouseDownPosition.x = event.clientX;
+    AppState.mouseDownPosition.y = event.clientY;
+    AppState.isDragging = false;
+  },
+
+  onMouseUp(event) {
+    const deltaX = Math.abs(event.clientX - AppState.mouseDownPosition.x);
+    const deltaY = Math.abs(event.clientY - AppState.mouseDownPosition.y);
+    AppState.isDragging = deltaX > 5 || deltaY > 5;
+  },
+
+  onMouseClick(event) {
+    if (AppState.miniMap.isResizing || AppState.isDragging) return;
+    
+    this.updateMousePosition(event.clientX, event.clientY);
+    this.handleClick();
+  },
+
+  onTouchStart(event) {
+    event.preventDefault();
+    if (event.touches.length === 1) {
+      const touch = event.touches[0];
+      AppState.mouseDownPosition.x = touch.clientX;
+      AppState.mouseDownPosition.y = touch.clientY;
+      AppState.isDragging = false;
+    }
+  },
+
+  onTouchMove(event) {
+    event.preventDefault();
+    if (event.touches.length === 1) {
+      const touch = event.touches[0];
+      this.updateMousePosition(touch.clientX, touch.clientY);
+      this.handleHover();
+    }
+  },
+
+  onTouchEnd(event) {
+    event.preventDefault();
+    if (event.changedTouches.length === 1) {
+      const touch = event.changedTouches[0];
+      const deltaX = Math.abs(touch.clientX - AppState.mouseDownPosition.x);
+      const deltaY = Math.abs(touch.clientY - AppState.mouseDownPosition.y);
+      AppState.isDragging = deltaX > 5 || deltaY > 5;
       
-      // Show arrows for hovered level (only if arrows are enabled and no selection)
-      windArrows.forEach(arrow => {
-        if (settings.showWindArrows && arrow.userData.yLevel === hoveredYLevel) {
-          arrow.visible = true;
-        } else {
-          arrow.visible = false;
-        }
-      });
+      if (!AppState.isDragging) {
+        this.updateMousePosition(touch.clientX, touch.clientY);
+        this.handleClick();
+      }
+      
+      UIManager.hideTooltip();
+      AppState.isHovering = false;
     }
-    // If a flight level is selected, maintain current visual state (no hover effects)
-  } else {
-    isHovering = false;
-    
-    // Change cursor to move when not hovering over cubes (orbit mode)
-    canvas.style.cursor = 'move';
-    
-    // Hide tooltip
-    tooltip.style.display = 'none';
-    
-    // Restore appropriate state based on whether a flight level is selected
-    if (selectedFlightLevel !== null) {
-      // Maintain selection state (no changes needed - selection is locked)
-      // Visual state should remain as it was when selection was made
-    } else {
-      // No selection - restore default hover-off state
-      // Hide all arrows when no selection and not hovering
-      windArrows.forEach(arrow => {
-        arrow.visible = false;
-      });
-      // Opacity will be handled by distance calculation in animate()
-    }
-  }
-}
+  },
 
-// Handle mouse down to track drag start
-function onMouseDown(event) {
-  mouseDownPosition.x = event.clientX;
-  mouseDownPosition.y = event.clientY;
-  isDragging = false;
-}
-
-// Handle mouse up to detect drag vs click
-function onMouseUp(event) {
-  const deltaX = Math.abs(event.clientX - mouseDownPosition.x);
-  const deltaY = Math.abs(event.clientY - mouseDownPosition.y);
-  const dragThreshold = 5; // pixels
-  
-  isDragging = deltaX > dragThreshold || deltaY > dragThreshold;
-}
-
-// Handle mouse clicks for selection
-function onMouseClick(event) {
-  // Skip if currently resizing mini map
-  if (isResizing) {
-    return;
-  }
-  
-  // Only process click if it wasn't a drag (orbit controls)
-  if (isDragging) {
-    return;
-  }
-  
-  const canvas = renderer.domElement;
-  const rect = canvas.getBoundingClientRect();
-  
-  mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-  mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-  
-  raycaster.setFromCamera(mouse, camera);
-  const intersects = raycaster.intersectObjects(windCubes);
-  
-  if (intersects.length > 0) {
-    const clickedCube = intersects[0].object;
-    const clickedYLevel = clickedCube.userData.yLevel;
-    
-    // If clicking the same level, deselect
-    if (selectedFlightLevel === clickedYLevel) {
-      deselectFlightLevel();
-    } else {
-      selectFlightLevel(clickedYLevel);
-    }
-  }
-  // Removed background deselection - only cube clicks affect selection
-}
-
-// Touch event handlers for mobile support
-function onTouchStart(event) {
-  event.preventDefault(); // Prevent default touch behaviors like scrolling
-  
-  if (event.touches.length === 1) {
-    const touch = event.touches[0];
-    mouseDownPosition.x = touch.clientX;
-    mouseDownPosition.y = touch.clientY;
-    isDragging = false;
-  }
-}
-
-function onTouchMove(event) {
-  event.preventDefault(); // Prevent default touch behaviors like scrolling
-  
-  if (event.touches.length === 1) {
-    const touch = event.touches[0];
-    const canvas = renderer.domElement;
+  onWindowResize() {
+    const canvas = AppState.renderer.domElement;
     const rect = canvas.getBoundingClientRect();
     
-    mouse.x = ((touch.clientX - rect.left) / rect.width) * 2 - 1;
-    mouse.y = -((touch.clientY - rect.top) / rect.height) * 2 + 1;
+    AppState.camera.aspect = rect.width / rect.height;
+    AppState.camera.updateProjectionMatrix();
+    AppState.renderer.setSize(rect.width, rect.height);
+  },
+
+  onWindowBlur() {
+    if (AppState.miniMap.isResizing) {
+      MiniMapManager.onResizeEnd();
+    }
+  },
+
+  updateMousePosition(clientX, clientY) {
+    const canvas = AppState.renderer.domElement;
+    const rect = canvas.getBoundingClientRect();
     
-    raycaster.setFromCamera(mouse, camera);
-    const intersects = raycaster.intersectObjects(windCubes);
+    AppState.mouse.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+    AppState.mouse.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+  },
+
+  handleHover() {
+    AppState.raycaster.setFromCamera(AppState.mouse, AppState.camera);
+    const intersects = AppState.raycaster.intersectObjects(AppState.windCubes);
     
     if (intersects.length > 0) {
       const hoveredCube = intersects[0].object;
-      const hoveredYLevel = hoveredCube.userData.yLevel;
-      const flightLevel = hoveredCube.userData.flightLevel;
-      const windSpeed = hoveredCube.userData.speed;
-      isHovering = true;
+      let cubeToShow = hoveredCube;
       
-      // Show tooltip with flight level info
-      tooltip.style.display = 'block';
-      tooltip.style.left = (touch.clientX + 10) + 'px';
-      tooltip.style.top = (touch.clientY - 10) + 'px';
-      
-      // Calculate grid coordinates (convert from world position to grid reference)
-      const gridX = Math.round((hoveredCube.position.x + 9) / 2);
-      const gridZ = Math.round((hoveredCube.position.z + 9) / 2);
-      
-      // Calculate wind direction in degrees (from wind direction vector)
-      const windDir = hoveredCube.userData.windDirection;
-      const windAngle = Math.atan2(windDir.z, windDir.x) * 180 / Math.PI;
-      const windDirection = ((windAngle + 360) % 360).toFixed(0); // Convert to 0-360 degrees
-      
-      tooltip.innerHTML = `FL${String(flightLevel).padStart(3, '0')}<br/>Wind: ${windSpeed} kt @ ${windDirection}°<br/>Grid: ${gridX}, ${gridZ}`;
-      
-      // Only apply hover effects if no flight level is currently selected
-      if (selectedFlightLevel === null) {
-        // Apply hover effects
-        windCubes.forEach(cube => {
-          let targetOpacity;
-          if (cube.userData.yLevel === hoveredYLevel) {
-            // Highlight hovered level (preview)
-            targetOpacity = 0.4;
-          } else {
-            // Dim other levels using GUI setting
-            targetOpacity = settings.cubeOpacity;
-          }
-          
-          cube.material.opacity = targetOpacity;
-        });
-        
-        // Show arrows for hovered level (only if arrows are enabled and no selection)
-        windArrows.forEach(arrow => {
-          if (settings.showWindArrows && arrow.userData.yLevel === hoveredYLevel) {
-            arrow.visible = true;
-          } else {
-            arrow.visible = false;
-          }
-        });
+      if (AppState.selectedFlightLevel !== null) {
+        const targetCube = AppState.windCubes.find(cube => 
+          cube.position.x === hoveredCube.position.x && 
+          cube.position.z === hoveredCube.position.z && 
+          cube.userData.yLevel === AppState.selectedFlightLevel
+        );
+        if (targetCube) cubeToShow = targetCube;
       }
-      // If a flight level is selected, maintain current visual state (no hover effects)
+      
+      AppState.isHovering = true;
+      AppState.renderer.domElement.style.cursor = 'pointer';
+      UIManager.showTooltip(cubeToShow, event.clientX, event.clientY);
+      
+      if (AppState.selectedFlightLevel === null) {
+        this.applyHoverEffects(hoveredCube.userData.yLevel);
+      }
     } else {
-      isHovering = false;
+      this.handleHoverEnd();
+    }
+  },
+
+  handleHoverEnd() {
+    AppState.isHovering = false;
+    AppState.renderer.domElement.style.cursor = 'move';
+    UIManager.hideTooltip();
+    
+    if (AppState.selectedFlightLevel === null) {
+      AppState.windArrows.forEach(arrow => arrow.visible = false);
+    }
+  },
+
+  applyHoverEffects(hoveredYLevel) {
+    AppState.windCubes.forEach(cube => {
+      cube.material.opacity = cube.userData.yLevel === hoveredYLevel ? 0.4 : Config.settings.cubeOpacity;
+    });
+    
+    AppState.windArrows.forEach(arrow => {
+      arrow.visible = Config.settings.showWindArrows && arrow.userData.yLevel === hoveredYLevel;
+    });
+  },
+
+  handleClick() {
+    AppState.raycaster.setFromCamera(AppState.mouse, AppState.camera);
+    const intersects = AppState.raycaster.intersectObjects(AppState.windCubes);
+    
+    if (intersects.length > 0) {
+      const clickedCube = intersects[0].object;
+      const clickedYLevel = clickedCube.userData.yLevel;
       
-      // Hide tooltip
-      tooltip.style.display = 'none';
-      
-      // Restore selection state or default opacity
-      if (selectedFlightLevel !== null) {
-        // Restore selection state
-        windCubes.forEach(cube => {
-          let targetOpacity;
-          if (cube.userData.yLevel === selectedFlightLevel) {
-            targetOpacity = 0.5; // Keep selected level bright
-          } else {
-            targetOpacity = settings.cubeOpacity; // Use GUI setting
-          }
-          
-          cube.material.opacity = targetOpacity;
-        });
-        
-        // Show arrows only for selected level when not hovering
-        windArrows.forEach(arrow => {
-          arrow.visible = arrow.userData.yLevel === selectedFlightLevel;
-        });
+      if (AppState.selectedFlightLevel === clickedYLevel) {
+        SelectionManager.deselectFlightLevel();
       } else {
-        // Hide all arrows when no selection and not hovering
-        windArrows.forEach(arrow => {
-          arrow.visible = false;
-        });
+        SelectionManager.selectFlightLevel(clickedYLevel);
       }
     }
   }
-}
+};
 
-function onTouchEnd(event) {
-  event.preventDefault(); // Prevent default touch behaviors like scrolling
-  
-  if (event.changedTouches.length === 1) {
-    const touch = event.changedTouches[0];
-    const deltaX = Math.abs(touch.clientX - mouseDownPosition.x);
-    const deltaY = Math.abs(touch.clientY - mouseDownPosition.y);
-    const dragThreshold = 5; // pixels
+// === UI MANAGEMENT ===
+const UIManager = {
+  init() {
+    this.createGUI();
+    this.createTooltip();
+    TimeControls.updateDisplay();
+  },
+
+  createTooltip() {
+    AppState.tooltip = document.createElement('div');
+    AppState.tooltip.id = 'tooltip';
+    Object.assign(AppState.tooltip.style, {
+      position: 'absolute',
+      backgroundColor: 'rgba(0, 20, 40, 0.9)',
+      color: 'white',
+      padding: '8px 12px',
+      borderRadius: '6px',
+      fontSize: '14px',
+      fontFamily: 'Geist, system-ui, sans-serif',
+      pointerEvents: 'none',
+      zIndex: '1000',
+      display: 'none',
+      whiteSpace: 'nowrap',
+      border: '2px solid white',
+      boxShadow: '0 0 20px white',
+      backdropFilter: 'blur(8px)',
+      webkitBackdropFilter: 'blur(8px)'
+    });
+    document.body.appendChild(AppState.tooltip);
+  },
+
+  showTooltip(cube, clientX, clientY) {
+    const regionBounds = Config.regions[Config.settings.region].bounds;
+    const normalizedX = Utils.normalizeGridPosition(cube.position.x);
+    const normalizedZ = Utils.normalizeGridPosition(cube.position.z);
     
-    isDragging = deltaX > dragThreshold || deltaY > dragThreshold;
+    const lat = regionBounds[0][0] + (regionBounds[1][0] - regionBounds[0][0]) * normalizedZ;
+    const lon = regionBounds[0][1] + (regionBounds[1][1] - regionBounds[0][1]) * normalizedX;
     
-    // Only process tap if it wasn't a drag (orbit controls)
-    if (!isDragging) {
-      const canvas = renderer.domElement;
-      const rect = canvas.getBoundingClientRect();
-      
-      mouse.x = ((touch.clientX - rect.left) / rect.width) * 2 - 1;
-      mouse.y = -((touch.clientY - rect.top) / rect.height) * 2 + 1;
-      
-      raycaster.setFromCamera(mouse, camera);
-      const intersects = raycaster.intersectObjects(windCubes);
-      
-      if (intersects.length > 0) {
-        const tappedCube = intersects[0].object;
-        const tappedYLevel = tappedCube.userData.yLevel;
-        
-        // If tapping the same level, deselect
-        if (selectedFlightLevel === tappedYLevel) {
-          deselectFlightLevel();
-        } else {
-          selectFlightLevel(tappedYLevel);
-        }
+    const windDir = cube.userData.windDirection;
+    const windAngle = Math.atan2(windDir.z, windDir.x) * 180 / Math.PI;
+    const windDirection = ((windAngle + 360) % 360).toFixed(0);
+    
+    const latStr = Math.abs(lat).toFixed(2) + '°' + (lat >= 0 ? 'N' : 'S');
+    const lonStr = Math.abs(lon).toFixed(2) + '°' + (lon >= 0 ? 'E' : 'W');
+    
+    AppState.tooltip.innerHTML = `FL${String(cube.userData.flightLevel).padStart(3, '0')}<br/>Wind: ${cube.userData.speed} kt @ ${windDirection}°<br/>${latStr} ${lonStr}`;
+    AppState.tooltip.style.display = 'block';
+    AppState.tooltip.style.left = (clientX + 10) + 'px';
+    AppState.tooltip.style.top = (clientY - 10) + 'px';
+  },
+
+  hideTooltip() {
+    AppState.tooltip.style.display = 'none';
+  },
+
+  createGUI() {
+    AppState.gui = new dat.GUI();
+    AppState.gui.width = 300;
+    
+    // Region selector
+    AppState.gui.add(Config.settings, 'region', Object.keys(Config.regions))
+      .name('US Region')
+      .onChange(RegionManager.updateRegion.bind(RegionManager));
+    
+    // Map style selector
+    AppState.gui.add(Config.settings, 'mapStyle', ['OpenStreetMap', 'Satellite', 'Terrain'])
+      .name('Map Style')
+      .onChange(MapManager.updateStyle.bind(MapManager));
+    
+    this.createOptionsFolder();
+    this.createSimulationsFolder();
+    this.createTimeFolder();
+    
+    // Wind randomization button
+    AppState.gui.add({ randomizeWind: () => this.randomizeWind() }, 'randomizeWind').name('Randomize Wind');
+  },
+
+  createOptionsFolder() {
+    const optionsFolder = AppState.gui.addFolder('Options');
+    
+    optionsFolder.add(Config.settings, 'darkBackground')
+      .name('Dark Background')
+      .onChange(SceneManager.updateBackgroundColor.bind(SceneManager));
+    
+    optionsFolder.add(Config.settings, 'showWindArrows')
+      .name('Wind Arrows')
+      .onChange(SelectionManager.toggleWindArrows.bind(SelectionManager));
+    
+    optionsFolder.add(Config.settings, 'cubeOpacity', 0.01, 0.3)
+      .name('Cube Opacity')
+      .onChange(this.updateCubeOpacity.bind(this));
+    
+    optionsFolder.open();
+  },
+
+  createSimulationsFolder() {
+    const simulationsFolder = AppState.gui.addFolder('Simulations');
+    
+    simulationsFolder.add(Config.settings, 'thunderstormActive')
+      .name('Thunderstorm')
+      .onChange(this.onStormToggle.bind(this, 'thunderstorm'));
+    
+    simulationsFolder.add(Config.settings, 'hurricaneActive')
+      .name('Hurricane')
+      .onChange(this.onStormToggle.bind(this, 'hurricane'));
+    
+    simulationsFolder.add(Config.settings, 'hurricaneIntensity', 1, 5, 1)
+      .name('Hurricane Category')
+      .onChange(this.onHurricaneIntensityChange.bind(this));
+    
+    simulationsFolder.open();
+  },
+
+  createTimeFolder() {
+    const timeFolder = AppState.gui.addFolder('Date & Time');
+    
+    TimeControls.createDateController(timeFolder);
+    TimeControls.createTimeController(timeFolder);
+    
+    timeFolder.open();
+  },
+
+  onStormToggle(stormType, value) {
+    const positionKey = stormType === 'hurricane' ? 'hurricanePosition' : 'thunderstormPosition';
+    if (value) {
+      Config.settings[positionKey] = Utils.getRandomPosition();
+    }
+    WindGenerator.regenerate();
+    if (AppState.selectedFlightLevel !== null) {
+      MiniMapManager.update();
+    }
+  },
+
+  onHurricaneIntensityChange() {
+    if (Config.settings.hurricaneActive) {
+      WindGenerator.regenerate();
+      if (AppState.selectedFlightLevel !== null) {
+        MiniMapManager.update();
       }
     }
+  },
+
+  randomizeWind() {
+    if (Config.settings.thunderstormActive) {
+      Config.settings.thunderstormPosition = Utils.getRandomPosition();
+    }
     
-    // Always hide tooltip when touch ends
-    tooltip.style.display = 'none';
-    isHovering = false;
+    if (Config.settings.hurricaneActive) {
+      Config.settings.hurricanePosition = Utils.getRandomPosition();
+    }
     
-    // Restore proper opacity state
-    if (selectedFlightLevel !== null) {
-      // Maintain selection state (locked - no changes)
-      // Visual state should remain as it was when selection was made
-    } else {
-      // No selection - restore default state
-      windArrows.forEach(arrow => {
-        arrow.visible = false;
+    const randomHourOffset = Math.floor(Math.random() * 24);
+    const randomDayOffset = Math.floor(Math.random() * 30);
+    
+    const originalTime = { ...AppState.currentTime };
+    const originalDate = new Date(AppState.currentDate);
+    
+    AppState.currentTime.hour = (AppState.currentTime.hour + randomHourOffset) % 24;
+    AppState.currentDate.setDate(AppState.currentDate.getDate() + randomDayOffset);
+    
+    WindGenerator.regenerate();
+    
+    AppState.currentTime = originalTime;
+    AppState.currentDate = originalDate;
+    TimeControls.updateDisplay();
+    
+    if (AppState.selectedFlightLevel !== null) {
+      setTimeout(() => MiniMapManager.update(), 50);
+    }
+  },
+
+  updateCubeOpacity() {
+    if (!AppState.isHovering && AppState.selectedFlightLevel === null) {
+      AppState.windCubes.forEach(cube => {
+        cube.material.opacity = Config.settings.cubeOpacity;
+      });
+    } else if (AppState.selectedFlightLevel !== null) {
+      AppState.windCubes.forEach(cube => {
+        if (cube.userData.yLevel !== AppState.selectedFlightLevel) {
+          cube.material.opacity = Config.settings.cubeOpacity;
+        }
       });
     }
   }
-}
+};
 
-// Mini map resize event handlers
-function onMiniMapResizeStart(event) {
-  event.preventDefault();
-  event.stopPropagation();
-  
-  isResizing = true;
-  
-  const containerRect = miniMapContainer.getBoundingClientRect();
-  resizeStartSize.width = containerRect.width;
-  resizeStartSize.height = containerRect.height;
-  
-  if (event.type === 'mousedown') {
-    resizeStartMouse.x = event.clientX;
-    resizeStartMouse.y = event.clientY;
+// === TIME CONTROLS ===
+const TimeControls = {
+  updateDisplay() {
+    Config.settings.currentDate = Utils.formatDate(AppState.currentDate);
+    Config.settings.currentTime = Utils.formatTime(AppState.currentTime);
     
-    document.addEventListener('mousemove', onMiniMapResize, true); // Use capture
-    document.addEventListener('mouseup', onMiniMapResizeEnd, true); // Use capture
-  } else if (event.type === 'touchstart') {
-    const touch = event.touches[0];
-    resizeStartMouse.x = touch.clientX;
-    resizeStartMouse.y = touch.clientY;
+    if (AppState.gui) {
+      AppState.gui.updateDisplay();
+    }
+  },
+
+  changeDate(days) {
+    const newDate = new Date(AppState.currentDate);
+    newDate.setDate(newDate.getDate() + days);
+    AppState.currentDate = newDate;
+    this.updateDisplay();
+    WindGenerator.regenerate();
     
-    document.addEventListener('touchmove', onMiniMapResize, { passive: false, capture: true });
-    document.addEventListener('touchend', onMiniMapResizeEnd, { capture: true });
-  }
-}
+    if (AppState.selectedFlightLevel !== null) {
+      MiniMapManager.update();
+    }
+  },
 
-function onMiniMapResize(event) {
-  if (!isResizing) return;
-  
-  event.preventDefault();
-  event.stopPropagation();
-  
-  let clientX, clientY;
-  if (event.type === 'mousemove') {
-    clientX = event.clientX;
-    clientY = event.clientY;
-  } else if (event.type === 'touchmove') {
-    const touch = event.touches[0];
-    clientX = touch.clientX;
-    clientY = touch.clientY;
-  }
-  
-  const deltaX = clientX - resizeStartMouse.x;
-  const deltaY = -(clientY - resizeStartMouse.y); // Invert Y because handle is at top
-  
-  // Use the larger delta to maintain 1:1 aspect ratio
-  const delta = Math.max(deltaX, deltaY);
-  
-  // Get constraints based on screen size
-  const isSmallScreen = window.innerWidth <= 768;
-  const minSize = isSmallScreen ? 120 : 150;
-  const maxSize = isSmallScreen ? 300 : 400;
-  
-  // Apply same size to both width and height (square aspect ratio)
-  const newSize = Math.max(minSize, Math.min(maxSize, resizeStartSize.width + delta));
-  
-  // Update container size
-  miniMapContainer.style.width = newSize + 'px';
-  miniMapContainer.style.height = newSize + 'px';
-  
-  // Update renderer size
-  miniMapRenderer.setSize(newSize - 8, newSize - 8); // Account for border
-  
-  // Update mini map arrow positions after resize
-  if (selectedFlightLevel !== null) {
-    updateMiniMapArrowPositions();
-  }
-}
+  changeTime(hours) {
+    AppState.currentTime.hour += hours;
+    
+    if (AppState.currentTime.hour >= 24) {
+      AppState.currentTime.hour = 0;
+      this.changeDate(1);
+      return;
+    } else if (AppState.currentTime.hour < 0) {
+      AppState.currentTime.hour = 23;
+      this.changeDate(-1);
+      return;
+    }
+    
+    this.updateDisplay();
+    WindGenerator.regenerate();
+    
+    if (AppState.selectedFlightLevel !== null) {
+      MiniMapManager.update();
+    }
+  },
 
-function onMiniMapResizeEnd(event) {
-  if (event) {
+  createDateController(folder) {
+    const dateController = folder.add(Config.settings, 'currentDate').name('Date').listen();
+    const dateRow = dateController.domElement.parentElement.parentElement;
+    
+    this.setupNavigationRow(dateRow, () => this.changeDate(-1), () => this.changeDate(1));
+    
+    const dateInput = dateController.domElement.querySelector('input');
+    dateInput.readOnly = true;
+    dateInput.style.textAlign = 'center';
+    dateInput.style.width = '100%';
+    dateInput.parentElement.style.width = '120px';
+  },
+
+  createTimeController(folder) {
+    const timeController = folder.add(Config.settings, 'currentTime').name('Time').listen();
+    const timeRow = timeController.domElement.parentElement.parentElement;
+    
+    this.setupNavigationRow(timeRow, () => this.changeTime(-1), () => this.changeTime(1));
+    
+    const timeInput = timeController.domElement.querySelector('input');
+    timeInput.readOnly = true;
+    timeInput.style.textAlign = 'center';
+    timeInput.style.width = '100%';
+    timeInput.parentElement.style.width = '120px';
+  },
+
+  setupNavigationRow(row, prevCallback, nextCallback) {
+    row.style.display = 'flex';
+    row.style.alignItems = 'center';
+    row.style.gap = '8px';
+    
+    const label = row.querySelector('.property-name');
+    row.insertBefore(label, row.firstChild);
+    
+    const buttonsContainer = document.createElement('div');
+    buttonsContainer.style.display = 'flex';
+    buttonsContainer.style.gap = '4px';
+    
+    const prevBtn = this.createNavButton('←', prevCallback);
+    const nextBtn = this.createNavButton('→', nextCallback);
+    
+    buttonsContainer.appendChild(prevBtn);
+    buttonsContainer.appendChild(nextBtn);
+    row.appendChild(buttonsContainer);
+  },
+
+  createNavButton(text, callback) {
+    const button = document.createElement('button');
+    button.className = 'nav-button';
+    button.textContent = text;
+    button.onclick = callback;
+    return button;
+  }
+};
+
+// === MAP MANAGEMENT ===
+const MapManager = {
+  init() {
+    this.initLeaflet();
+    this.updateRegion(Config.settings.region);
+  },
+
+  initLeaflet() {
+    const mapDiv = document.getElementById('leaflet-map');
+    AppState.leafletMap = L.map(mapDiv, {
+      zoomControl: false,
+      attributionControl: false,
+      dragging: false,
+      touchZoom: false,
+      scrollWheelZoom: false,
+      doubleClickZoom: false,
+      boxZoom: false
+    });
+    
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19
+    }).addTo(AppState.leafletMap);
+  },
+
+  updateRegion(regionName) {
+    const region = Config.regions[regionName];
+    AppState.leafletMap.setView(region.center, region.zoom);
+    this.captureTexture();
+  },
+
+  updateStyle(styleName) {
+    AppState.leafletMap.eachLayer(layer => {
+      if (layer instanceof L.TileLayer) {
+        AppState.leafletMap.removeLayer(layer);
+      }
+    });
+    
+    const tileUrls = {
+      'OpenStreetMap': 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+      'Satellite': 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+      'Terrain': 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png'
+    };
+    
+    L.tileLayer(tileUrls[styleName] || tileUrls['OpenStreetMap']).addTo(AppState.leafletMap);
+    this.captureTexture();
+  },
+
+  captureTexture() {
+    const region = Config.regions[Config.settings.region];
+    const zoom = region.zoom;
+    const center = region.center;
+    
+    const lat = center[0];
+    const lng = center[1];
+    
+    const x = Math.floor((lng + 180) / 360 * Math.pow(2, zoom));
+    const y = Math.floor((1 - Math.log(Math.tan(lat * Math.PI / 180) + 1 / Math.cos(lat * Math.PI / 180)) / Math.PI) / 2 * Math.pow(2, zoom));
+    
+    const tileUrls = {
+      'OpenStreetMap': `https://tile.openstreetmap.org/${zoom}/${x}/${y}.png`,
+      'Satellite': `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${zoom}/${y}/${x}`,
+      'Terrain': `https://tile.opentopomap.org/${zoom}/${x}/${y}.png`
+    };
+    
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    
+    img.onload = () => this.processLoadedImage(img);
+    img.onerror = () => this.createFallbackTexture();
+    
+    img.src = tileUrls[Config.settings.mapStyle] || tileUrls['OpenStreetMap'];
+  },
+
+  processLoadedImage(img) {
+    AppState.mapContext.clearRect(0, 0, CONSTANTS.MAP.TEXTURE_SIZE, CONSTANTS.MAP.TEXTURE_SIZE);
+    AppState.mapContext.drawImage(img, 0, 0, CONSTANTS.MAP.TEXTURE_SIZE, CONSTANTS.MAP.TEXTURE_SIZE);
+    
+    this.addRegionLabel();
+    this.updateTexture();
+  },
+
+  createFallbackTexture() {
+    AppState.mapContext.fillStyle = '#4a7c59';
+    AppState.mapContext.fillRect(0, 0, CONSTANTS.MAP.TEXTURE_SIZE, CONSTANTS.MAP.TEXTURE_SIZE);
+    
+    this.addGridPattern();
+    this.addRegionLabel();
+    this.updateTexture();
+  },
+
+  addGridPattern() {
+    AppState.mapContext.strokeStyle = '#3a5a2a';
+    AppState.mapContext.lineWidth = 1;
+    for (let i = 0; i < CONSTANTS.MAP.TEXTURE_SIZE; i += 64) {
+      AppState.mapContext.beginPath();
+      AppState.mapContext.moveTo(i, 0);
+      AppState.mapContext.lineTo(i, CONSTANTS.MAP.TEXTURE_SIZE);
+      AppState.mapContext.stroke();
+      AppState.mapContext.beginPath();
+      AppState.mapContext.moveTo(0, i);
+      AppState.mapContext.lineTo(CONSTANTS.MAP.TEXTURE_SIZE, i);
+      AppState.mapContext.stroke();
+    }
+  },
+
+  addRegionLabel() {
+    AppState.mapContext.fillStyle = 'rgba(0, 0, 0, 0.7)';
+    AppState.mapContext.fillRect(10, 10, 150, 30);
+    AppState.mapContext.fillStyle = 'white';
+    AppState.mapContext.font = '16px Arial';
+    AppState.mapContext.fillText(Config.settings.region, 20, 30);
+  },
+
+  updateTexture() {
+    if (AppState.mapTexture) {
+      AppState.mapTexture.needsUpdate = true;
+    } else {
+      AppState.mapTexture = new THREE.CanvasTexture(AppState.mapCanvas);
+    }
+    
+    if (AppState.groundPlane) {
+      AppState.groundPlane.material.map = AppState.mapTexture;
+      AppState.groundPlane.material.needsUpdate = true;
+    }
+    
+    MiniMapManager.updateGroundPlane();
+  }
+};
+
+// === REGION MANAGEMENT ===
+const RegionManager = {
+  updateRegion(regionName) {
+    Config.settings.region = regionName;
+    MapManager.updateRegion(regionName);
+    WindGenerator.regenerate();
+    MiniMapManager.update();
+    MiniMapManager.updateGroundPlane();
+  }
+};
+
+// === MINI MAP MANAGEMENT ===
+const MiniMapManager = {
+  init() {
+    AppState.miniMap.container = document.getElementById('mini-map-container');
+    AppState.miniMap.canvas = document.getElementById('mini-map-canvas');
+    
+    this.setupScene();
+    this.setupCamera();
+    this.setupRenderer();
+    this.setupLighting();
+    this.createGroundPlane();
+  },
+
+  setupScene() {
+    AppState.miniMap.scene = new THREE.Scene();
+    AppState.miniMap.scene.background = new THREE.Color(0x000000);
+  },
+
+  setupCamera() {
+    AppState.miniMap.camera = new THREE.OrthographicCamera(-10, 10, 10, -10, 0.1, 100);
+    AppState.miniMap.camera.position.set(0, 50, 0);
+    AppState.miniMap.camera.lookAt(0, 0, 0);
+  },
+
+  setupRenderer() {
+    AppState.miniMap.renderer = new THREE.WebGLRenderer({ 
+      canvas: AppState.miniMap.canvas, 
+      antialias: true 
+    });
+    
+    const containerRect = AppState.miniMap.container.getBoundingClientRect();
+    AppState.miniMap.renderer.setSize(containerRect.width - 8, containerRect.height - 8);
+  },
+
+  setupLighting() {
+    const miniMapLight = new THREE.AmbientLight(0xffffff, 1.0);
+    AppState.miniMap.scene.add(miniMapLight);
+  },
+
+  createGroundPlane() {
+    const miniMapGeometry = new THREE.PlaneGeometry(CONSTANTS.MAP.GROUND_SIZE, CONSTANTS.MAP.GROUND_SIZE);
+    const miniMapMaterial = new THREE.MeshLambertMaterial({ color: 0x4a7c59 });
+    AppState.miniMap.groundPlane = new THREE.Mesh(miniMapGeometry, miniMapMaterial);
+    AppState.miniMap.groundPlane.rotation.x = -Math.PI / 2;
+    AppState.miniMap.groundPlane.position.y = -1;
+    AppState.miniMap.scene.add(AppState.miniMap.groundPlane);
+  },
+
+  update() {
+    if (!AppState.miniMap.renderer) return;
+    
+    if (AppState.selectedFlightLevel !== null) {
+      AppState.miniMap.container.classList.add('visible');
+      this.updateCubes();
+      this.updateArrows();
+    } else {
+      AppState.miniMap.container.classList.remove('visible');
+      this.clearArrows();
+    }
+  },
+
+  updateCubes() {
+    AppState.miniMap.cubes.forEach(cube => AppState.miniMap.scene.remove(cube));
+    AppState.miniMap.cubes = [];
+    
+    AppState.windCubes.forEach(cube => {
+      if (cube.userData.yLevel === AppState.selectedFlightLevel) {
+        const miniCube = cube.clone();
+        miniCube.position.copy(cube.position);
+        miniCube.position.y = 0;
+        miniCube.material = cube.material.clone();
+        miniCube.material.opacity = 0.25;
+        AppState.miniMap.scene.add(miniCube);
+        AppState.miniMap.cubes.push(miniCube);
+        
+        this.createArrow(cube);
+      }
+    });
+  },
+
+  updateArrows() {
+    AppState.miniMap.arrows.forEach(arrow => {
+      arrow.style.display = Config.settings.showWindArrows ? 'block' : 'none';
+    });
+  },
+
+  createArrow(cube) {
+    const arrow = document.createElement('div');
+    arrow.className = 'mini-map-arrow';
+    
+    const windDirection = cube.userData.windDirection;
+    const containerRect = AppState.miniMap.container.getBoundingClientRect();
+    const mapSize = containerRect.width - 8;
+    
+    const normalizedX = Utils.normalizeGridPosition(cube.position.x);
+    const normalizedZ = Utils.normalizeGridPosition(cube.position.z);
+    
+    const pixelX = normalizedX * mapSize;
+    const pixelZ = normalizedZ * mapSize;
+    
+    arrow.style.left = `${pixelX}px`;
+    arrow.style.top = `${pixelZ}px`;
+    
+    const windAngle = Math.atan2(windDirection.z, windDirection.x) * 180 / Math.PI;
+    const speed = cube.userData.speed;
+    const bankingEffect = Math.sin((cube.position.x + cube.position.z) * 0.3) * 5;
+    const speedBanking = (speed - 50) / 10;
+    const totalRotation = windAngle + bankingEffect + speedBanking;
+    
+    const scale = 0.6 + (speed / 100) * 0.4;
+    arrow.style.transform = `translate(-50%, -100%) rotate(${totalRotation}deg) scale(${scale})`;
+    
+    arrow.style.display = Config.settings.showWindArrows ? 'block' : 'none';
+    arrow.dataset.cubeIndex = AppState.windCubes.indexOf(cube);
+    
+    AppState.miniMap.container.appendChild(arrow);
+    AppState.miniMap.arrows.push(arrow);
+  },
+
+  clearArrows() {
+    AppState.miniMap.arrows.forEach(arrow => {
+      AppState.miniMap.container.removeChild(arrow);
+    });
+    AppState.miniMap.arrows = [];
+  },
+
+  updateArrowVisibility() {
+    AppState.miniMap.arrows.forEach(arrow => {
+      arrow.style.display = Config.settings.showWindArrows ? 'block' : 'none';
+    });
+  },
+
+  updateGroundPlane() {
+    if (!AppState.miniMap.groundPlane || !AppState.mapTexture) return;
+    
+    AppState.miniMap.groundPlane.material = new THREE.MeshLambertMaterial({ 
+      map: AppState.mapTexture,
+      color: 0xcccccc
+    });
+    
+    AppState.miniMap.groundPlane.material.emissive = new THREE.Color(0x111111);
+    AppState.miniMap.groundPlane.material.needsUpdate = true;
+  },
+
+  updateArrowPositions() {
+    const containerRect = AppState.miniMap.container.getBoundingClientRect();
+    const mapSize = containerRect.width - 8;
+    
+    AppState.miniMap.arrows.forEach(arrow => {
+      const cubeIndex = parseInt(arrow.dataset.cubeIndex);
+      const cube = AppState.windCubes[cubeIndex];
+      
+      if (cube && cube.userData.yLevel === AppState.selectedFlightLevel) {
+        const normalizedX = Utils.normalizeGridPosition(cube.position.x);
+        const normalizedZ = Utils.normalizeGridPosition(cube.position.z);
+        
+        const pixelX = normalizedX * mapSize;
+        const pixelZ = normalizedZ * mapSize;
+        
+        arrow.style.left = `${pixelX}px`;
+        arrow.style.top = `${pixelZ}px`;
+      }
+    });
+  },
+
+  onResizeStart(event) {
     event.preventDefault();
     event.stopPropagation();
-  }
-  
-  isResizing = false;
-  
-  // Remove event listeners with matching options
-  document.removeEventListener('mousemove', onMiniMapResize, true);
-  document.removeEventListener('mouseup', onMiniMapResizeEnd, true);
-  document.removeEventListener('touchmove', onMiniMapResize, { passive: false, capture: true });
-  document.removeEventListener('touchend', onMiniMapResizeEnd, { capture: true });
-  
-  // Failsafe: also remove without capture in case there was a mismatch
-  document.removeEventListener('mousemove', onMiniMapResize);
-  document.removeEventListener('mouseup', onMiniMapResizeEnd);
-  document.removeEventListener('touchmove', onMiniMapResize);
-  document.removeEventListener('touchend', onMiniMapResizeEnd);
-}
-
-// Select a flight level
-function selectFlightLevel(yLevel) {
-  // Clear previous selection
-  deselectFlightLevel();
-  
-  selectedFlightLevel = yLevel;
-  
-  // Add white wireframes to selected cubes and set opacity
-  windCubes.forEach(cube => {
-    if (cube.userData.yLevel === yLevel) {
-      // Highlight selected level
-      cube.material.opacity = 0.5;
+    
+    AppState.miniMap.isResizing = true;
+    
+    const containerRect = AppState.miniMap.container.getBoundingClientRect();
+    AppState.miniMap.resizeStartSize.width = containerRect.width;
+    AppState.miniMap.resizeStartSize.height = containerRect.height;
+    
+    if (event.type === 'mousedown') {
+      AppState.miniMap.resizeStartMouse.x = event.clientX;
+      AppState.miniMap.resizeStartMouse.y = event.clientY;
       
-      // Add wireframe outline
-      const wireframeGeometry = new THREE.BoxGeometry(2, 2, 2);
-      const wireframeMaterial = new THREE.MeshBasicMaterial({
-        color: 0xffffff, // White wireframe
-        wireframe: true,
-        transparent: true,
-        opacity: 0.8
-      });
-      const wireframe = new THREE.Mesh(wireframeGeometry, wireframeMaterial);
-      wireframe.position.copy(cube.position);
-      scene.add(wireframe);
-      selectedCubes.push(wireframe);
-    } else {
-      // Use GUI setting for dimmed levels
-      cube.material.opacity = settings.cubeOpacity;
-    }
-  });
-  
-  // Show arrows for selected level (only if arrows are enabled)
-  windArrows.forEach(arrow => {
-    arrow.visible = settings.showWindArrows && arrow.userData.yLevel === yLevel;
-  });
-  updateMiniMap(); // Update mini map when flight level is selected
-}
-
-// Deselect current flight level
-function deselectFlightLevel() {
-  selectedFlightLevel = null;
-  
-  // Remove all wireframes
-  selectedCubes.forEach(wireframe => {
-    scene.remove(wireframe);
-  });
-  selectedCubes = [];
-  
-  // Reset all cube opacities to default
-  windCubes.forEach(cube => {
-    cube.material.opacity = settings.cubeOpacity;
-  });
-  
-  // Hide all arrows
-  windArrows.forEach(arrow => {
-    arrow.visible = false;
-  });
-  updateMiniMap(); // Update mini map when flight level is deselected
-}
-
-// Handle window resize
-function onWindowResize() {
-  const canvas = renderer.domElement;
-  const rect = canvas.getBoundingClientRect();
-  
-  camera.aspect = rect.width / rect.height;
-  camera.updateProjectionMatrix();
-  renderer.setSize(rect.width, rect.height);
-}
-
-// Animation loop
-function animate() {
-  requestAnimationFrame(animate);
-  
-  // Update controls
-  controls.update();
-
-  // Update cube opacity based on camera distance only when not hovering and not selected
-  if (!isHovering && selectedFlightLevel === null) {
-    const cameraPosition = camera.position;
-    windCubes.forEach(cube => {
-      const distance = cameraPosition.distanceTo(cube.position);
-      const opacity = Math.max(0.02, Math.min(settings.cubeOpacity, (80 - distance) / 80)); // Use GUI setting as max
-      cube.material.opacity = opacity;
-    });
-  }
-  // When a flight level is selected, maintain the locked visual state (no distance-based opacity changes)
-  
-  // Animate wind arrows for more dynamic flow
-  const time = Date.now() * 0.001; // Current time in seconds
-  windArrows.forEach((arrow, index) => {
-    if (arrow.visible) {
-      // Add subtle oscillation to make wind look alive
-      // Store the base Z rotation if not already stored
-      if (arrow.userData.baseRotationZ === undefined) {
-        arrow.userData.baseRotationZ = arrow.rotation.z;
-      }
+      document.addEventListener('mousemove', this.onResize.bind(this), true);
+      document.addEventListener('mouseup', this.onResizeEnd.bind(this), true);
+    } else if (event.type === 'touchstart') {
+      const touch = event.touches[0];
+      AppState.miniMap.resizeStartMouse.x = touch.clientX;
+      AppState.miniMap.resizeStartMouse.y = touch.clientY;
       
-      // Add gentle oscillation
-      const oscillation = Math.sin(time * 1.5 + index * 0.2) * 0.03; // Very subtle
-      arrow.rotation.z = arrow.userData.baseRotationZ + oscillation;
+      document.addEventListener('touchmove', this.onResize.bind(this), { passive: false, capture: true });
+      document.addEventListener('touchend', this.onResizeEnd.bind(this), { capture: true });
     }
-  });
-  
-  // Animate mini map HTML arrows too
-  miniMapArrows.forEach((arrow, index) => {
-    if (!arrow.dataset.baseRotation) {
-      // Extract base rotation from current transform
-      const currentTransform = arrow.style.transform;
-      const rotateMatch = currentTransform.match(/rotate\(([^)]+)deg\)/);
-      if (rotateMatch) {
-        arrow.dataset.baseRotation = rotateMatch[1];
-      }
+  },
+
+  onResize(event) {
+    if (!AppState.miniMap.isResizing) return;
+    
+    event.preventDefault();
+    event.stopPropagation();
+    
+    let clientX, clientY;
+    if (event.type === 'mousemove') {
+      clientX = event.clientX;
+      clientY = event.clientY;
+    } else if (event.type === 'touchmove') {
+      const touch = event.touches[0];
+      clientX = touch.clientX;
+      clientY = touch.clientY;
     }
     
-    if (arrow.dataset.baseRotation) {
-      const baseRotation = parseFloat(arrow.dataset.baseRotation);
-      const oscillation = Math.sin(time * 1.5 + index * 0.2) * 2; // ±2 degrees
-      const newRotation = baseRotation + oscillation;
-      
-      // Update transform while preserving other parts
-      const currentTransform = arrow.style.transform;
-      const newTransform = currentTransform.replace(
-        /rotate\([^)]+deg\)/,
-        `rotate(${newRotation}deg)`
-      );
-      arrow.style.transform = newTransform;
+    const deltaX = clientX - AppState.miniMap.resizeStartMouse.x;
+    const deltaY = -(clientY - AppState.miniMap.resizeStartMouse.y);
+    const delta = Math.max(deltaX, deltaY);
+    
+    const isSmallScreen = window.innerWidth <= 768;
+    const minSize = isSmallScreen ? 120 : 150;
+    const maxSize = isSmallScreen ? 300 : 400;
+    
+    const newSize = Math.max(minSize, Math.min(maxSize, AppState.miniMap.resizeStartSize.width + delta));
+    
+    AppState.miniMap.container.style.width = newSize + 'px';
+    AppState.miniMap.container.style.height = newSize + 'px';
+    
+    AppState.miniMap.renderer.setSize(newSize - 8, newSize - 8);
+    
+    if (AppState.selectedFlightLevel !== null) {
+      this.updateArrowPositions();
     }
-  });
-  
-  // Render main scene
-  renderer.render(scene, camera);
-  
-  // Render mini map if visible
-  if (miniMapRenderer && selectedFlightLevel !== null) {
-    miniMapRenderer.render(miniMapScene, miniMapCamera);
-  }
-}
+  },
 
-// Update cube opacity based on GUI setting
-function updateCubeOpacity() {
-  // Only update if no specific hover/selection state is active
-  if (!isHovering && selectedFlightLevel === null) {
-    windCubes.forEach(cube => {
-      cube.material.opacity = settings.cubeOpacity;
-    });
-  } else if (selectedFlightLevel !== null) {
-    // Update dimmed cubes in locked selection state
-    windCubes.forEach(cube => {
-      if (cube.userData.yLevel !== selectedFlightLevel) {
-        cube.material.opacity = settings.cubeOpacity;
+  onResizeEnd(event) {
+    if (event) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+    
+    AppState.miniMap.isResizing = false;
+    
+    document.removeEventListener('mousemove', this.onResize.bind(this), true);
+    document.removeEventListener('mouseup', this.onResizeEnd.bind(this), true);
+    document.removeEventListener('touchmove', this.onResize.bind(this), { passive: false, capture: true });
+    document.removeEventListener('touchend', this.onResizeEnd.bind(this), { capture: true });
+    
+    document.removeEventListener('mousemove', this.onResize.bind(this));
+    document.removeEventListener('mouseup', this.onResizeEnd.bind(this));
+    document.removeEventListener('touchmove', this.onResize.bind(this));
+    document.removeEventListener('touchend', this.onResizeEnd.bind(this));
+  }
+};
+
+// === LABELS MANAGEMENT ===
+const LabelsManager = {
+  create() {
+    this.createFlightLevelLabels();
+    this.createCompassLabels();
+  },
+
+  createFlightLevelLabels() {
+    for (let y = 0; y < CONSTANTS.FLIGHT_LEVELS.COUNT * CONSTANTS.GRID.SPACING; y += CONSTANTS.GRID.SPACING) {
+      const flightLevel = CONSTANTS.FLIGHT_LEVELS.MIN + ((y / CONSTANTS.GRID.SPACING) * CONSTANTS.FLIGHT_LEVELS.INCREMENT);
+      const flStr = String(flightLevel).padStart(3, '0');
+      this.createTextSprite(`FL${flStr}`, 11, y, 0);
+    }
+  },
+
+  createCompassLabels() {
+    this.createTextSprite('N', 0, 0, -11);
+    this.createTextSprite('S', 0, 0, 11);
+    this.createTextSprite('E', 11, 0, 0);
+    this.createTextSprite('W', -11, 0, 0);
+  },
+
+  createTextSprite(text, x, y, z) {
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d');
+    canvas.width = 256;
+    canvas.height = 64;
+    
+    context.fillStyle = 'rgba(0, 0, 0, 0.8)';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    
+    context.fillStyle = 'white';
+    context.font = '24px Geist, system-ui, sans-serif';
+    context.textAlign = 'center';
+    context.fillText(text, canvas.width / 2, 40);
+    
+    const texture = new THREE.CanvasTexture(canvas);
+    const material = new THREE.SpriteMaterial({ map: texture });
+    const sprite = new THREE.Sprite(material);
+    
+    sprite.position.set(x, y, z);
+    sprite.scale.set(4, 1, 1);
+    AppState.scene.add(sprite);
+  }
+};
+
+// === ANIMATION LOOP ===
+const AnimationLoop = {
+  start() {
+    this.animate();
+  },
+
+  animate() {
+    requestAnimationFrame(this.animate.bind(this));
+    
+    AppState.controls.update();
+    
+    this.updateCubeOpacity();
+    this.animateArrows();
+    
+    AppState.renderer.render(AppState.scene, AppState.camera);
+    
+    if (AppState.miniMap.renderer && AppState.selectedFlightLevel !== null) {
+      AppState.miniMap.renderer.render(AppState.miniMap.scene, AppState.miniMap.camera);
+    }
+  },
+
+  updateCubeOpacity() {
+    if (!AppState.isHovering && AppState.selectedFlightLevel === null) {
+      const cameraPosition = AppState.camera.position;
+      AppState.windCubes.forEach(cube => {
+        const distance = cameraPosition.distanceTo(cube.position);
+        const opacity = Math.max(0.02, Math.min(Config.settings.cubeOpacity, (80 - distance) / 80));
+        cube.material.opacity = opacity;
+      });
+    }
+  },
+
+  animateArrows() {
+    const time = Date.now() * 0.001;
+    
+    AppState.windArrows.forEach((arrow, index) => {
+      if (arrow.visible) {
+        if (arrow.userData.baseRotationZ === undefined) {
+          arrow.userData.baseRotationZ = arrow.rotation.z;
+        }
+        
+        const oscillation = Math.sin(time * CONSTANTS.ANIMATION.OSCILLATION_SPEED + index * 0.2) * CONSTANTS.ANIMATION.OSCILLATION_AMPLITUDE;
+        arrow.rotation.z = arrow.userData.baseRotationZ + oscillation;
       }
-      // Keep selected level bright (don't change its opacity)
+    });
+    
+    AppState.miniMap.arrows.forEach((arrow, index) => {
+      if (!arrow.dataset.baseRotation) {
+        const currentTransform = arrow.style.transform;
+        const rotateMatch = currentTransform.match(/rotate\(([^)]+)deg\)/);
+        if (rotateMatch) {
+          arrow.dataset.baseRotation = rotateMatch[1];
+        }
+      }
+      
+      if (arrow.dataset.baseRotation) {
+        const baseRotation = parseFloat(arrow.dataset.baseRotation);
+        const oscillation = Math.sin(time * CONSTANTS.ANIMATION.OSCILLATION_SPEED + index * 0.2) * CONSTANTS.ANIMATION.MINI_MAP_OSCILLATION;
+        const newRotation = baseRotation + oscillation;
+        
+        const currentTransform = arrow.style.transform;
+        const newTransform = currentTransform.replace(
+          /rotate\([^)]+deg\)/,
+          `rotate(${newRotation}deg)`
+        );
+        arrow.style.transform = newTransform;
+      }
     });
   }
+};
+
+// === INITIALIZATION ===
+function initApp() {
+  SceneManager.init();
+  WindGenerator.generateGrid();
+  LabelsManager.create();
+  UIManager.init();
+  MiniMapManager.init();
+  EventHandlers.init();
+  AnimationLoop.start();
 }
 
-// Start the visualization
-initScene();
-animate(); 
+// Start the application
+initApp();
 </script>
